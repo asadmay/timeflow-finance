@@ -1,14 +1,10 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Upload, FileText, CheckCircle, AlertCircle, X, Download } from "lucide-react";
+import { Upload, FileText, CheckCircle, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/PageHeader";
 import type { Transaction } from "@shared/schema";
-
-// Реальные заголовки экспорта Дзенмани:
-// date,categoryName,payee,comment,outcomeAccountName,outcome,outcomeCurrencyShortTitle,
-// incomeAccountName,income,incomeCurrencyShortTitle,createdDate,changedDate
 
 type ZenRow = {
   date: string;
@@ -30,7 +26,6 @@ type ParseResult = {
 };
 
 function parseAmount(raw: string): number {
-  // "70,00" -> 70, "1 234,56" -> 1234.56
   return parseFloat(raw.replace(/\s/g, "").replace(",", ".")) || 0;
 }
 
@@ -53,24 +48,25 @@ function parseCsvText(
   existingExpenseCats: string[],
   existingAccounts: string[]
 ): ParseResult {
-  const lines = text.trim().split(/\r?\n/);
+  let lines = text.trim().split(/\r?\n/);
   const errors: string[] = [];
 
   if (lines.length < 2)
     return { rows: [], skippedTransfers: 0, newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст"] };
 
-  const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, ""));
+  // Пропускаем служебную строку Дзенмани zm_dump_XXXX
+  if (lines[0].toLowerCase().startsWith("zm_dump")) {
+    lines = lines.slice(1);
+  }
 
+  if (lines.length < 2)
+    return { rows: [], skippedTransfers: 0, newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст после заголовка"] };
+
+  const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, ""));
   const idx = (name: string) => headers.indexOf(name);
 
-  // Стандартный формат Дзенмани
-  const isZenFormat =
-    idx("date") !== -1 &&
-    (idx("outcome") !== -1 || idx("income") !== -1);
-
-  // Простой формат (date,type,category,account,amount,description)
-  const isSimpleFormat =
-    idx("date") !== -1 && idx("amount") !== -1;
+  const isZenFormat = idx("date") !== -1 && (idx("outcome") !== -1 || idx("income") !== -1);
+  const isSimpleFormat = idx("date") !== -1 && idx("amount") !== -1;
 
   if (!isZenFormat && !isSimpleFormat) {
     return {
@@ -105,35 +101,19 @@ function parseCsvText(
     let account: string;
 
     if (isZenFormat) {
-      const outcomeRaw = get("outcome");
-      const incomeRaw = get("income");
+      const outcomeAmt = parseAmount(get("outcome"));
+      const incomeAmt = parseAmount(get("income"));
       const outcomeAccount = get("outcomeaccountname");
       const incomeAccount = get("incomeaccountname");
 
-      const outcomeAmt = parseAmount(outcomeRaw);
-      const incomeAmt = parseAmount(incomeRaw);
+      const hasOutcome = outcomeAmt > 0 && !!outcomeAccount;
+      const hasIncome = incomeAmt > 0 && !!incomeAccount;
 
-      const hasOutcome = outcomeAmt > 0 && outcomeAccount;
-      const hasIncome = incomeAmt > 0 && incomeAccount;
-
-      if (hasOutcome && hasIncome) {
-        // Перевод между счетами — пропускаем
-        skippedTransfers++;
-        continue;
-      } else if (hasOutcome) {
-        type = "expense";
-        amount = outcomeAmt;
-        account = outcomeAccount;
-      } else if (hasIncome) {
-        type = "income";
-        amount = incomeAmt;
-        account = incomeAccount;
-      } else {
-        errors.push(`Строка ${i + 1}: нет суммы`);
-        continue;
-      }
+      if (hasOutcome && hasIncome) { skippedTransfers++; continue; }
+      else if (hasOutcome) { type = "expense"; amount = outcomeAmt; account = outcomeAccount; }
+      else if (hasIncome) { type = "income"; amount = incomeAmt; account = incomeAccount; }
+      else { errors.push(`Строка ${i + 1}: нет суммы`); continue; }
     } else {
-      // Простой формат
       const rawAmt = get("amount").replace(/[^\d.,-]/g, "").replace(",", ".");
       amount = Math.abs(parseFloat(rawAmt));
       if (!amount) { errors.push(`Строка ${i + 1}: некорректная сумма`); continue; }
@@ -142,13 +122,10 @@ function parseCsvText(
       account = get("account") || "Основной";
     }
 
-    // Трекинг новых категорий
     if (type === "income" && category !== "Прочее" && !existingIncomeCats.includes(category))
       newIncomeCategories.add(category);
     if (type === "expense" && category !== "Прочее" && !existingExpenseCats.includes(category))
       newExpenseCategories.add(category);
-
-    // Трекинг новых счетов
     if (account && !existingAccounts.includes(account) && !newAccounts.has(account))
       newAccounts.set(account, "card");
 
@@ -156,8 +133,7 @@ function parseCsvText(
   }
 
   return {
-    rows,
-    skippedTransfers,
+    rows, skippedTransfers,
     newIncomeCategories: Array.from(newIncomeCategories),
     newExpenseCategories: Array.from(newExpenseCategories),
     newAccounts: Array.from(newAccounts.entries()).map(([name, type]) => ({ name, type })),
@@ -212,7 +188,6 @@ export default function ImportPage() {
         amount: Math.round(parseFloat(row.amount) * 100),
         comment: row.description || "",
         currency: row.currency || "RUB",
-        source: "zenmoney",
       })),
       newIncomeCategories: parsed.newIncomeCategories,
       newExpenseCategories: parsed.newExpenseCategories,
@@ -244,7 +219,7 @@ export default function ImportPage() {
         <Upload className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
         <div className="text-sm font-medium text-foreground mb-1">Перетащите CSV файл из Дзенмани</div>
         <div className="text-xs text-muted-foreground">или нажмите для выбора</div>
-        <div className="text-xs text-muted-foreground/60 mt-1">Переводы между счетами будут пропущены</div>
+        <div className="text-xs text-muted-foreground/50 mt-1">Переводы между счетами пропускаются автоматически</div>
       </div>
 
       <input ref={fileRef} type="file" accept=".csv" className="hidden"
@@ -331,7 +306,7 @@ export default function ImportPage() {
             </div>
             {importData.skipped > 0 && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Пропущено</span>
+                <span className="text-muted-foreground">Пропущено (дубли)</span>
                 <span className="text-yellow-400">{importData.skipped}</span>
               </div>
             )}
@@ -358,7 +333,7 @@ function RecentTransactions() {
   if (transactions.length === 0) return null;
   return (
     <div className="mt-6">
-      <h3 className="text-sm font-semibold text-muted-foreground mb-3">Последние транзакции ({transactions.length} всего)</h3>
+      <h3 className="text-sm font-semibold text-muted-foreground mb-3">Последние ({transactions.length} всего)</h3>
       <div className="space-y-1">
         {recent.map((t: any) => (
           <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/10 last:border-0">
