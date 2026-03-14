@@ -6,7 +6,6 @@
   :root {
     --font-sans: 'Inter', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    /* Dark gaming finance theme */
     --background: 222 20% 8%;
     --foreground: 210 20% 92%;
     --card: 222 18% 11%;
@@ -33,6 +32,8 @@
     --color-liability: 25 95% 53%;
     --color-time: 271 91% 65%;
     --color-goal: 43 90% 56%;
+    --color-cashflow-pos: 142 71% 45%;
+    --color-cashflow-neg: 0 72% 51%;
   }
 }
 
@@ -44,6 +45,42 @@
   }
 }
 
-.num { font-variant-numeric: tabular-nums; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+.glow-gold { box-shadow: 0 0 20px hsl(43 90% 56% / 0.15); }
+.glow-green { box-shadow: 0 0 20px hsl(142 71% 45% / 0.15); }
+.glow-red { box-shadow: 0 0 20px hsl(0 72% 51% / 0.15); }
+
+.nav-tab-active {
+  background: linear-gradient(135deg, hsl(43 90% 56% / 0.15), hsl(43 90% 56% / 0.05));
+  border-left: 2px solid hsl(43 90% 56%);
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.count-animate { animation: countUp 0.3s ease-out; }
+
+.category-label {
+  @apply text-xs font-semibold uppercase tracking-widest;
+  color: hsl(var(--muted-foreground));
+}
+
 .val-pos { color: hsl(var(--color-income)); }
 .val-neg { color: hsl(var(--color-expense)); }
+.val-neutral { color: hsl(var(--foreground)); }
+
+.item-card { @apply transition-all duration-200; }
+.item-card:hover { background: hsl(var(--accent)); transform: translateX(2px); }
+
+.progress-gold { background: linear-gradient(90deg, hsl(43 90% 56%), hsl(43 90% 70%)); }
+.progress-green { background: linear-gradient(90deg, hsl(142 71% 45%), hsl(142 71% 55%)); }
+
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
