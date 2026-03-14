@@ -1,19 +1,20 @@
-export function formatRub(amount: number): string {
-  const abs = Math.abs(amount);
-  const formatted = new Intl.NumberFormat("ru-RU").format(abs);
-  return `${amount < 0 ? "−" : ""}${formatted} ₽`;
+export function formatCurrency(amount: number, currency: string = 'USD'): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount);
 }
 
-export function formatRubSigned(amount: number): string {
-  const formatted = new Intl.NumberFormat("ru-RU").format(Math.abs(amount));
-  return `${amount >= 0 ? "+" : "−"}${formatted} ₽`;
+export function formatDate(date: string | Date): string {
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(typeof date === 'string' ? new Date(date) : date);
 }
 
-export function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
-  return arr.reduce((acc, item) => {
-    const k = key(item);
-    if (!acc[k]) acc[k] = [];
-    acc[k].push(item);
-    return acc;
-  }, {} as Record<string, T[]>);
+export function formatPercentage(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }

@@ -1,67 +1,43 @@
-import { build as esbuild } from "esbuild";
-import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { build } from 'esbuild';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
-const allowlist = [
-  "@google/generative-ai",
-  "axios",
-  "connect-pg-simple",
-  "cors",
-  "date-fns",
-  "drizzle-orm",
-  "drizzle-zod",
-  "express",
-  "express-rate-limit",
-  "express-session",
-  "jsonwebtoken",
-  "memorystore",
-  "multer",
-  "nanoid",
-  "nodemailer",
-  "openai",
-  "passport",
-  "passport-local",
-  "pg",
-  "stripe",
-  "uuid",
-  "ws",
-  "xlsx",
-  "zod",
-  "zod-validation-error",
-];
+const outdir = 'dist';
 
-async function buildAll() {
-  await rm("dist", { recursive: true, force: true });
+// Clean dist directory
+if (fs.existsSync(outdir)) {
+  fs.rmSync(outdir, { recursive: true });
+}
+fs.mkdirSync(outdir);
+fs.mkdirSync(path.join(outdir, 'client'));
 
-  console.log("building client...");
-  await viteBuild();
-
-  console.log("building server...");
-  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
-
-  await esbuild({
-    entryPoints: ["server/index.ts"],
-    platform: "node",
-    bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
-    define: {
-      "process.env.NODE_ENV": '"production"',
-    },
-    minify: true,
-    external: externals,
-    logLevel: "info",
-  });
+// Build client with Vite
+console.log('Building client...');
+try {
+  execSync('npx vite build', { stdio: 'inherit' });
+} catch (e) {
+  console.error('Client build failed:', e);
+  process.exit(1);
 }
 
-buildAll().catch((err) => {
-  console.error(err);
+// Build server with esbuild
+console.log('Building server...');
+try {
+  await build({
+    entryPoints: ['server/index.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: path.join(outdir, 'server.js'),
+    packages: 'external',
+    define: {
+      'process.env.NODE_ENV': '"production"'
+    }
+  });
+} catch (e) {
+  console.error('Server build failed:', e);
   process.exit(1);
-});
+}
+
+console.log('Build complete!');
