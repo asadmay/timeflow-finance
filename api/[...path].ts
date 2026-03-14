@@ -1,40 +1,235 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import express, { type Request, type Response, type NextFunction } from "express";
-import { registerRoutes } from "../server/routes";
-import { createServer } from "http";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "../shared/schema";
+import { DatabaseStorage } from "../server/storage";
+import {
+  insertAccountSchema, insertDepositSchema, insertIncomeCategorySchema,
+  insertExpenseCategorySchema, insertBrokerPositionSchema, insertTransactionSchema,
+  insertIncomeSchema, insertExpenseSchema, insertAssetSchema, insertLiabilitySchema,
+  insertGoalSchema, insertTimeEntrySchema, insertProfileSchema,
+} from "../shared/schema";
 
-const app = express();
-app.use(express.json({ limit: "20mb" }));
-app.use(express.urlencoded({ extended: false }));
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
 
-let initialized = false;
-async function init() {
-  if (initialized) return;
-  initialized = true;
-  const server = createServer(app);
-  await registerRoutes(server, app);
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    if (!res.headersSent) res.status(status).json({ message: err.message || "Internal Server Error" });
-  });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 3,
+});
+export const db = drizzle(pool, { schema });
+const storage = new DatabaseStorage();
+
+function getPath(req: VercelRequest): string {
+  const parts = req.query.path;
+  if (Array.isArray(parts)) return "/api/" + parts.join("/");
+  if (typeof parts === "string") return "/api/" + parts;
+  return "/api";
 }
-const initPromise = init().catch(console.error);
+
+function getId(path: string): number {
+  const parts = path.split("/");
+  return parseInt(parts[parts.length - 1]);
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  await initPromise;
+  const path = getPath(req);
+  const method = req.method?.toUpperCase() ?? "GET";
+  const body = req.body;
 
-  // Reconstruct full /api/... path from Vercel's catch-all query param
-  const pathArr = (req.query.path as string[]) || [];
-  req.url = "/api/" + pathArr.join("/");
-  const qs = Object.entries(req.query)
-    .filter(([k]) => k !== "path")
-    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-    .join("&");
-  if (qs) req.url += "?" + qs;
+  res.setHeader("Content-Type", "application/json");
 
-  return new Promise<void>((resolve) => {
-    app(req as any, res as any, () => resolve());
-    res.on("finish", resolve);
-    res.on("close", resolve);
-  });
+  try {
+    // ── Profile
+    if (path === "/api/profile") {
+      if (method === "GET") return res.json(await storage.getProfile());
+      if (method === "PUT" || method === "PATCH") {
+        const data = insertProfileSchema.partial().parse(body);
+        return res.json(await storage.updateProfile(data));
+      }
+    }
+
+    // ── Accounts
+    if (path === "/api/accounts") {
+      if (method === "GET") return res.json(await storage.getAccounts());
+      if (method === "POST") return res.json(await storage.createAccount(insertAccountSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/accounts\/\d+$/)) {
+      const id = getId(path);
+      if (method === "GET") return res.json(await storage.getAccount(id));
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateAccount(id, insertAccountSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteAccount(id); return res.json({ ok: true }); }
+    }
+
+    // ── Deposits
+    if (path === "/api/deposits") {
+      if (method === "GET") return res.json(await storage.getDeposits());
+      if (method === "POST") return res.json(await storage.createDeposit(insertDepositSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/deposits\/\d+$/)) {
+      const id = getId(path);
+      if (method === "GET") return res.json(await storage.getDeposit(id));
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateDeposit(id, insertDepositSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteDeposit(id); return res.json({ ok: true }); }
+    }
+
+    // ── Income Categories
+    if (path === "/api/income-categories") {
+      if (method === "GET") return res.json(await storage.getIncomeCategories());
+      if (method === "POST") return res.json(await storage.createIncomeCategory(insertIncomeCategorySchema.parse(body)));
+    }
+    if (path.match(/^\/api\/income-categories\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateIncomeCategory(id, insertIncomeCategorySchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteIncomeCategory(id); return res.json({ ok: true }); }
+    }
+
+    // ── Expense Categories
+    if (path === "/api/expense-categories") {
+      if (method === "GET") return res.json(await storage.getExpenseCategories());
+      if (method === "POST") return res.json(await storage.createExpenseCategory(insertExpenseCategorySchema.parse(body)));
+    }
+    if (path.match(/^\/api\/expense-categories\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateExpenseCategory(id, insertExpenseCategorySchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteExpenseCategory(id); return res.json({ ok: true }); }
+    }
+
+    // ── Transactions
+    if (path === "/api/transactions") {
+      if (method === "GET") return res.json(await storage.getTransactions());
+      if (method === "POST") {
+        const { description, ...rest } = body;
+        return res.json(await storage.createTransaction(insertTransactionSchema.parse({ ...rest, comment: description || rest.comment || "" })));
+      }
+      if (method === "DELETE") { await storage.clearTransactions(); return res.json({ ok: true }); }
+    }
+    if (path === "/api/transactions/batch") {
+      if (method === "POST") {
+        if (!Array.isArray(body)) return res.status(400).json({ message: "Expected array" });
+        const batch = body.slice(0, 50).map((t: any) => {
+          const { description, ...rest } = t;
+          return insertTransactionSchema.parse({ ...rest, comment: description || rest.comment || "" });
+        });
+        return res.json(await storage.createTransactionsBatch(batch));
+      }
+    }
+    if (path.match(/^\/api\/transactions\/\d+$/)) {
+      const id = getId(path);
+      if (method === "DELETE") { await storage.deleteTransaction(id); return res.json({ ok: true }); }
+    }
+
+    // ── Import ZenMoney
+    if (path === "/api/import/zenmoney") {
+      if (method === "POST") {
+        const { transactions: txns = [], newIncomeCategories = [], newExpenseCategories = [], newAccounts = [] } = body;
+        for (const name of newIncomeCategories as string[]) {
+          try { await storage.createIncomeCategory({ name, color: "#22c55e", icon: "trending-up", isDefault: false }); } catch {}
+        }
+        for (const name of newExpenseCategories as string[]) {
+          try { await storage.createExpenseCategory({ name, color: "#ef4444", icon: "trending-down", isDefault: false }); } catch {}
+        }
+        for (const acc of newAccounts as any[]) {
+          try { await storage.createAccount({ name: acc.name, type: acc.type || "card", balance: 0, currency: "RUB", color: "#6366f1", icon: "wallet", isArchived: false }); } catch {}
+        }
+        let imported = 0;
+        for (let i = 0; i < (txns as any[]).length; i += 50) {
+          const chunk = (txns as any[]).slice(i, i + 50).map((t: any) => ({
+            date: t.date, type: t.type, amount: t.amount,
+            currency: t.currency || "RUB", categoryName: t.categoryName || "",
+            accountName: t.accountName || "", payee: t.payee || "",
+            comment: t.description || t.comment || "", source: t.source || "zenmoney",
+          }));
+          const rows = await storage.createTransactionsBatch(chunk);
+          imported += rows.length;
+        }
+        return res.json({ imported, skipped: (txns as any[]).length - imported });
+      }
+    }
+
+    // ── Incomes
+    if (path === "/api/incomes") {
+      if (method === "GET") return res.json(await storage.getIncomes());
+      if (method === "POST") return res.json(await storage.createIncome(insertIncomeSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/incomes\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateIncome(id, insertIncomeSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteIncome(id); return res.json({ ok: true }); }
+    }
+
+    // ── Expenses
+    if (path === "/api/expenses") {
+      if (method === "GET") return res.json(await storage.getExpenses());
+      if (method === "POST") return res.json(await storage.createExpense(insertExpenseSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/expenses\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateExpense(id, insertExpenseSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteExpense(id); return res.json({ ok: true }); }
+    }
+
+    // ── Assets
+    if (path === "/api/assets") {
+      if (method === "GET") return res.json(await storage.getAssets());
+      if (method === "POST") return res.json(await storage.createAsset(insertAssetSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/assets\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateAsset(id, insertAssetSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteAsset(id); return res.json({ ok: true }); }
+    }
+
+    // ── Liabilities
+    if (path === "/api/liabilities") {
+      if (method === "GET") return res.json(await storage.getLiabilities());
+      if (method === "POST") return res.json(await storage.createLiability(insertLiabilitySchema.parse(body)));
+    }
+    if (path.match(/^\/api\/liabilities\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateLiability(id, insertLiabilitySchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteLiability(id); return res.json({ ok: true }); }
+    }
+
+    // ── Goals
+    if (path === "/api/goals") {
+      if (method === "GET") return res.json(await storage.getGoals());
+      if (method === "POST") return res.json(await storage.createGoal(insertGoalSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/goals\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateGoal(id, insertGoalSchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteGoal(id); return res.json({ ok: true }); }
+    }
+
+    // ── Broker Positions
+    if (path === "/api/broker-positions") {
+      if (method === "GET") return res.json(await storage.getBrokerPositions());
+      if (method === "POST") return res.json(await storage.createBrokerPosition(insertBrokerPositionSchema.parse(body)));
+      if (method === "DELETE") { await storage.clearBrokerPositions(); return res.json({ ok: true }); }
+    }
+    if (path === "/api/broker-positions/upsert") {
+      if (method === "POST") return res.json(await storage.upsertBrokerPosition(insertBrokerPositionSchema.parse(body)));
+    }
+    if (path.match(/^\/api\/broker-positions\/\d+$/)) {
+      const id = getId(path);
+      if (method === "DELETE") { await storage.deleteBrokerPosition(id); return res.json({ ok: true }); }
+    }
+
+    // ── Time Entries
+    if (path === "/api/time-entries") {
+      if (method === "GET") return res.json(await storage.getTimeEntries());
+      if (method === "POST") return res.json(await storage.createTimeEntry(insertTimeEntrySchema.parse(body)));
+    }
+    if (path.match(/^\/api\/time-entries\/\d+$/)) {
+      const id = getId(path);
+      if (method === "PUT" || method === "PATCH") return res.json(await storage.updateTimeEntry(id, insertTimeEntrySchema.partial().parse(body)));
+      if (method === "DELETE") { await storage.deleteTimeEntry(id); return res.json({ ok: true }); }
+    }
+
+    return res.status(404).json({ message: `Not found: ${method} ${path}` });
+  } catch (err: any) {
+    console.error(`[api] ${method} ${path} error:`, err);
+    return res.status(err.status || 500).json({ message: err.message || "Internal Server Error" });
+  }
 }
