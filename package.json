@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "vercel-build": "vite build && esbuild api/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=api/index.js --external:pg-native --packages=external"
+    "vercel-build": "vite build && esbuild api/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=api/index.js --external:pg-native --external:pg --external:express --external:drizzle-orm --external:zod --external:express-session --external:passport --external:passport-local --external:connect-pg-simple --external:memorystore --external:ws --external:papaparse --external:xlsx"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
