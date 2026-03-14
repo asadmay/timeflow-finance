@@ -6,7 +6,33 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/PageHeader";
 import type { Transaction } from "@shared/schema";
 
-const EXPECTED_COLS = ["date", "type", "category", "account", "amount", "description"];
+// Реальные заголовки экспорта Дзенмани (оба варианта — рус. и англ.)
+const ZEN_COL_MAP: Record<string, string> = {
+  // русские
+  "дата": "date",
+  "тип": "type",
+  "категория": "category",
+  "счёт": "account",
+  "счет": "account",
+  "сумма": "amount",
+  "комментарий": "description",
+  "описание": "description",
+  // английские
+  "date": "date",
+  "type": "type",
+  "category": "category",
+  "account": "account",
+  "amount": "amount",
+  "description": "description",
+  "comment": "description",
+  // возможные варианты
+  "income/expense": "type",
+  "income / expense": "type",
+  "приход/расход": "type",
+  "приход / расход": "type",
+};
+
+const REQUIRED_COLS = ["date", "amount"];
 
 type ZenRow = {
   date: string;
@@ -25,19 +51,46 @@ type ParseResult = {
   errors: string[];
 };
 
-function parseCsvText(text: string, existingIncomeCats: string[], existingExpenseCats: string[], existingAccounts: string[]): ParseResult {
+function normalizeType(raw: string): "income" | "expense" | null {
+  const v = raw.toLowerCase().trim();
+  if (["income", "доход", "+", "приход"].includes(v)) return "income";
+  if (["expense", "расход", "-", "расходы"].includes(v)) return "expense";
+  // по знаку суммы определим ниже
+  return null;
+}
+
+function parseCsvText(
+  text: string,
+  existingIncomeCats: string[],
+  existingExpenseCats: string[],
+  existingAccounts: string[]
+): ParseResult {
   const lines = text.trim().split(/\r?\n/);
   const errors: string[] = [];
 
-  if (lines.length < 2) return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст или содержит только заголовок"] };
+  if (lines.length < 2)
+    return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст или содержит только заголовок"] };
 
-  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/["']/g, ""));
-  const missing = EXPECTED_COLS.filter(c => !headers.includes(c));
+  // Parse header
+  const rawHeaders = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/["'\u00ab\u00bb]/g, ""));
+  // Map to normalized keys
+  const colIndex: Record<string, number> = {};
+  rawHeaders.forEach((h, i) => {
+    const mapped = ZEN_COL_MAP[h];
+    if (mapped && !(mapped in colIndex)) colIndex[mapped] = i;
+  });
+
+  const missing = REQUIRED_COLS.filter(c => !(c in colIndex));
   if (missing.length > 0) {
-    return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: [`Отсутствуют столбцы: ${missing.join(", ")}`] };
+    return {
+      rows: [],
+      newIncomeCategories: [],
+      newExpenseCategories: [],
+      newAccounts: [],
+      errors: [`Не удалось найти столбцы: ${missing.join(", ")}. Заголовки файла: ${rawHeaders.join(", ")}`],
+    };
   }
 
-  const idx = (col: string) => headers.indexOf(col);
   const newIncomeCategories = new Set<string>();
   const newExpenseCategories = new Set<string>();
   const newAccounts = new Map<string, string>();
@@ -47,7 +100,7 @@ function parseCsvText(text: string, existingIncomeCats: string[], existingExpens
     const raw = lines[i];
     if (!raw.trim()) continue;
 
-    // Simple CSV parse (handles quoted fields with commas)
+    // CSV parse with quoted fields
     const cols: string[] = [];
     let cur = "";
     let inQ = false;
@@ -58,42 +111,45 @@ function parseCsvText(text: string, existingIncomeCats: string[], existingExpens
     }
     cols.push(cur.trim());
 
-    const date = cols[idx("date")]?.trim();
-    const type = cols[idx("type")]?.trim().toLowerCase() as "income" | "expense";
-    const category = cols[idx("category")]?.trim() || "Прочее";
-    const account = cols[idx("account")]?.trim() || "Основной";
-    const amountStr = cols[idx("amount")]?.trim().replace(/[^\d.,-]/g, "").replace(",", ".");
-    const description = cols[idx("description")]?.trim();
+    const get = (key: string) => (colIndex[key] !== undefined ? cols[colIndex[key]] ?? "" : "").trim();
 
-    if (!date || !type || !amountStr) {
-      errors.push(`Строка ${i + 1}: пропущены обязательные поля`);
-      continue;
-    }
-    if (type !== "income" && type !== "expense") {
-      errors.push(`Строка ${i + 1}: тип должен быть income или expense`);
-      continue;
+    const date = get("date");
+    const category = get("category") || "Прочее";
+    const account = get("account") || "Основной";
+    const description = get("description");
+
+    // Amount — может быть со знаком
+    const rawAmount = get("amount").replace(/[^\d.,-]/g, "").replace(",", ".");
+    const amountFloat = parseFloat(rawAmount);
+
+    if (!date) { errors.push(`Строка ${i + 1}: нет даты`); continue; }
+    if (isNaN(amountFloat) || amountFloat === 0) { errors.push(`Строка ${i + 1}: некорректная сумма "${get("amount")}"`); continue; }
+
+    // Determine type
+    let type: "income" | "expense";
+    const rawType = get("type");
+    const parsedType = normalizeType(rawType);
+    if (parsedType) {
+      type = parsedType;
+    } else if (amountFloat > 0) {
+      type = "income";
+    } else {
+      type = "expense";
     }
 
-    const amountFloat = parseFloat(amountStr);
-    if (isNaN(amountFloat) || amountFloat <= 0) {
-      errors.push(`Строка ${i + 1}: некорректная сумма "${amountStr}"`);
-      continue;
-    }
+    const absAmount = Math.abs(amountFloat).toString();
 
     // Track new categories
-    if (type === "income" && !existingIncomeCats.includes(category)) {
+    if (type === "income" && category && !existingIncomeCats.includes(category))
       newIncomeCategories.add(category);
-    }
-    if (type === "expense" && !existingExpenseCats.includes(category)) {
+    if (type === "expense" && category && !existingExpenseCats.includes(category))
       newExpenseCategories.add(category);
-    }
 
     // Track new accounts
-    if (!existingAccounts.includes(account) && !newAccounts.has(account)) {
+    if (account && !existingAccounts.includes(account) && !newAccounts.has(account))
       newAccounts.set(account, "card");
-    }
 
-    rows.push({ date, type, category, account, amount: amountStr, description });
+    rows.push({ date, type, category, account, amount: absAmount, description });
   }
 
   return {
@@ -124,7 +180,7 @@ export default function ImportPage() {
     mutationFn: async (payload: any) => {
       return apiRequest("POST", "/api/import/zenmoney", payload);
     },
-    onSuccess: (data: any) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/transactions"] });
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
       qc.invalidateQueries({ queryKey: ["/api/income-categories"] });
@@ -133,10 +189,7 @@ export default function ImportPage() {
   });
 
   const handleFile = (file: File) => {
-    if (!file.name.endsWith(".csv")) {
-      alert("Только .csv файлы");
-      return;
-    }
+    if (!file.name.endsWith(".csv")) { alert("Только .csv файлы"); return; }
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -149,17 +202,15 @@ export default function ImportPage() {
 
   const handleImport = () => {
     if (!parsed || parsed.rows.length === 0) return;
-
     const transactions = parsed.rows.map(row => ({
       date: row.date,
       type: row.type,
       categoryName: row.category,
       accountName: row.account,
-      amount: Math.round(parseFloat(row.amount.replace(",", ".")) * 100),
+      amount: Math.round(parseFloat(row.amount) * 100),
       description: row.description || null,
       currency: "RUB",
     }));
-
     importMutation.mutate({
       transactions,
       newIncomeCategories: parsed.newIncomeCategories,
@@ -169,10 +220,9 @@ export default function ImportPage() {
   };
 
   const downloadTemplate = () => {
-    const header = EXPECTED_COLS.join(",");
-    const example = "2024-01-15,income,Зарплата,Сбербанк,75000,Зарплата январь";
-    const csv = `${header}\n${example}\n`;
-    const blob = new Blob([csv], { type: "text/csv" });
+    const header = "date,type,category,account,amount,description";
+    const example = "2024-01-15,income,Зарплата,Сбербанк,75000,Зарплата январь\n2024-01-20,expense,Продукты,Сбербанк,3500,Пятёрочка";
+    const blob = new Blob([`${header}\n${example}\n`], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "template.csv"; a.click();
@@ -186,7 +236,6 @@ export default function ImportPage() {
     <>
       <PageHeader title="Импорт" total={0} totalDisplay="" />
 
-      {/* Template download */}
       <div className="mb-4">
         <button
           onClick={downloadTemplate}
@@ -197,7 +246,6 @@ export default function ImportPage() {
         </button>
       </div>
 
-      {/* Drop zone */}
       <div
         className={cn(
           "border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer mb-4",
@@ -207,14 +255,13 @@ export default function ImportPage() {
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
+          e.preventDefault(); setDragOver(false);
           const f = e.dataTransfer.files[0];
           if (f) handleFile(f);
         }}
       >
         <Upload className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
-        <div className="text-sm font-medium text-foreground mb-1">Перетащите CSV файл</div>
+        <div className="text-sm font-medium text-foreground mb-1">Перетащите CSV файл из Дзенмани</div>
         <div className="text-xs text-muted-foreground">или нажмите для выбора</div>
       </div>
 
@@ -222,7 +269,6 @@ export default function ImportPage() {
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
       />
 
-      {/* File info */}
       {fileName && (
         <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-muted/30 border border-border/30">
           <FileText className="w-4 h-4 text-muted-foreground" />
@@ -233,7 +279,6 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* Parse result */}
       {parsed && (
         <div className="space-y-3 mb-4">
           {parsed.errors.length > 0 && (
@@ -250,7 +295,7 @@ export default function ImportPage() {
 
           <div className="p-3 rounded-lg bg-muted/30 border border-border/30 space-y-1.5">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Транзакций</span>
+              <span className="text-muted-foreground">Транзакций к импорту</span>
               <span className="font-semibold text-foreground">{parsed.rows.length}</span>
             </div>
             {parsed.newIncomeCategories.length > 0 && (
@@ -285,7 +330,6 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* Success */}
       {isSuccess && importData && (
         <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30">
           <div className="flex items-center gap-2 mb-2">
@@ -299,7 +343,7 @@ export default function ImportPage() {
             </div>
             {importData.skipped > 0 && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Пропущено (дубли)</span>
+                <span className="text-muted-foreground">Пропущено</span>
                 <span className="text-yellow-400">{importData.skipped}</span>
               </div>
             )}
@@ -314,7 +358,6 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* Recent transactions preview */}
       <RecentTransactions />
     </>
   );
@@ -337,11 +380,11 @@ function RecentTransactions() {
         {recent.map(t => (
           <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/10 last:border-0">
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-foreground truncate">{t.description || t.categoryName}</div>
-              <div className="text-xs text-muted-foreground">{t.date} · {t.accountName}</div>
+              <div className="text-xs text-foreground truncate">{(t as any).description || (t as any).categoryName}</div>
+              <div className="text-xs text-muted-foreground">{(t as any).date} · {(t as any).accountName}</div>
             </div>
-            <span className={`text-xs font-mono font-semibold ml-2 ${t.type === "income" ? "text-green-400" : "text-red-400"}`}>
-              {t.type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format(t.amount / 100)} ₽
+            <span className={`text-xs font-mono font-semibold ml-2 ${(t as any).type === "income" ? "text-green-400" : "text-red-400"}`}>
+              {(t as any).type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format((t as any).amount / 100)} ₽
             </span>
           </div>
         ))}
