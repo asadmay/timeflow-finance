@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   profile, accounts, deposits, incomeCategories, expenseCategories,
@@ -15,7 +15,7 @@ import {
 } from "../shared/schema";
 
 export class DatabaseStorage {
-  // ── Profile ──────────────────────────────────────────────────────────────
+  // ── Profile
   async getProfile(): Promise<Profile | undefined> {
     const rows = await db.select().from(profile).limit(1);
     if (rows.length > 0) return rows[0];
@@ -28,10 +28,8 @@ export class DatabaseStorage {
     return updated[0];
   }
 
-  // ── Accounts ─────────────────────────────────────────────────────────────
-  async getAccounts(): Promise<Account[]> {
-    return db.select().from(accounts);
-  }
+  // ── Accounts
+  async getAccounts(): Promise<Account[]> { return db.select().from(accounts); }
   async getAccount(id: number): Promise<Account | undefined> {
     const rows = await db.select().from(accounts).where(eq(accounts.id, id));
     return rows[0];
@@ -44,14 +42,10 @@ export class DatabaseStorage {
     const rows = await db.update(accounts).set(data).where(eq(accounts.id, id)).returning();
     return rows[0];
   }
-  async deleteAccount(id: number): Promise<void> {
-    await db.delete(accounts).where(eq(accounts.id, id));
-  }
+  async deleteAccount(id: number): Promise<void> { await db.delete(accounts).where(eq(accounts.id, id)); }
 
-  // ── Deposits ─────────────────────────────────────────────────────────────
-  async getDeposits(): Promise<Deposit[]> {
-    return db.select().from(deposits);
-  }
+  // ── Deposits
+  async getDeposits(): Promise<Deposit[]> { return db.select().from(deposits); }
   async getDeposit(id: number): Promise<Deposit | undefined> {
     const rows = await db.select().from(deposits).where(eq(deposits.id, id));
     return rows[0];
@@ -64,14 +58,10 @@ export class DatabaseStorage {
     const rows = await db.update(deposits).set(data).where(eq(deposits.id, id)).returning();
     return rows[0];
   }
-  async deleteDeposit(id: number): Promise<void> {
-    await db.delete(deposits).where(eq(deposits.id, id));
-  }
+  async deleteDeposit(id: number): Promise<void> { await db.delete(deposits).where(eq(deposits.id, id)); }
 
-  // ── Income Categories ────────────────────────────────────────────────────
-  async getIncomeCategories(): Promise<IncomeCategory[]> {
-    return db.select().from(incomeCategories);
-  }
+  // ── Income Categories
+  async getIncomeCategories(): Promise<IncomeCategory[]> { return db.select().from(incomeCategories); }
   async createIncomeCategory(data: InsertIncomeCategory): Promise<IncomeCategory> {
     const rows = await db.insert(incomeCategories).values(data).returning();
     return rows[0];
@@ -80,14 +70,10 @@ export class DatabaseStorage {
     const rows = await db.update(incomeCategories).set(data).where(eq(incomeCategories.id, id)).returning();
     return rows[0];
   }
-  async deleteIncomeCategory(id: number): Promise<void> {
-    await db.delete(incomeCategories).where(eq(incomeCategories.id, id));
-  }
+  async deleteIncomeCategory(id: number): Promise<void> { await db.delete(incomeCategories).where(eq(incomeCategories.id, id)); }
 
-  // ── Expense Categories ───────────────────────────────────────────────────
-  async getExpenseCategories(): Promise<ExpenseCategory[]> {
-    return db.select().from(expenseCategories);
-  }
+  // ── Expense Categories
+  async getExpenseCategories(): Promise<ExpenseCategory[]> { return db.select().from(expenseCategories); }
   async createExpenseCategory(data: InsertExpenseCategory): Promise<ExpenseCategory> {
     const rows = await db.insert(expenseCategories).values(data).returning();
     return rows[0];
@@ -96,60 +82,41 @@ export class DatabaseStorage {
     const rows = await db.update(expenseCategories).set(data).where(eq(expenseCategories.id, id)).returning();
     return rows[0];
   }
-  async deleteExpenseCategory(id: number): Promise<void> {
-    await db.delete(expenseCategories).where(eq(expenseCategories.id, id));
-  }
+  async deleteExpenseCategory(id: number): Promise<void> { await db.delete(expenseCategories).where(eq(expenseCategories.id, id)); }
 
-  // ── Broker Positions ─────────────────────────────────────────────────────
-  async getBrokerPositions(): Promise<BrokerPosition[]> {
-    return db.select().from(brokerPositions);
-  }
+  // ── Broker Positions
+  async getBrokerPositions(): Promise<BrokerPosition[]> { return db.select().from(brokerPositions); }
   async createBrokerPosition(data: InsertBrokerPosition): Promise<BrokerPosition> {
     const rows = await db.insert(brokerPositions).values(data).returning();
     return rows[0];
   }
   async upsertBrokerPosition(data: InsertBrokerPosition): Promise<BrokerPosition> {
-    const key = `${data.isin}_${data.broker}`;
-    const existing = await db.select().from(brokerPositions)
-      .where(eq(brokerPositions.isin, data.isin));
+    const isinVal = data.isin ?? "";
+    const existing = await db.select().from(brokerPositions).where(eq(brokerPositions.isin, isinVal));
     if (existing.length > 0) {
-      const rows = await db.update(brokerPositions).set(data)
-        .where(eq(brokerPositions.id, existing[0].id)).returning();
+      const rows = await db.update(brokerPositions).set(data).where(eq(brokerPositions.id, existing[0].id)).returning();
       return rows[0];
     }
     return this.createBrokerPosition(data);
   }
-  async deleteBrokerPosition(id: number): Promise<void> {
-    await db.delete(brokerPositions).where(eq(brokerPositions.id, id));
-  }
-  async clearBrokerPositions(): Promise<void> {
-    await db.delete(brokerPositions);
-  }
+  async deleteBrokerPosition(id: number): Promise<void> { await db.delete(brokerPositions).where(eq(brokerPositions.id, id)); }
+  async clearBrokerPositions(): Promise<void> { await db.delete(brokerPositions); }
 
-  // ── Transactions ─────────────────────────────────────────────────────────
-  async getTransactions(): Promise<Transaction[]> {
-    return db.select().from(transactions);
-  }
+  // ── Transactions
+  async getTransactions(): Promise<Transaction[]> { return db.select().from(transactions); }
   async createTransaction(data: InsertTransaction): Promise<Transaction> {
     const rows = await db.insert(transactions).values(data).returning();
     return rows[0];
   }
   async createTransactionsBatch(data: InsertTransaction[]): Promise<Transaction[]> {
     if (data.length === 0) return [];
-    const rows = await db.insert(transactions).values(data).returning();
-    return rows;
+    return db.insert(transactions).values(data).returning();
   }
-  async deleteTransaction(id: number): Promise<void> {
-    await db.delete(transactions).where(eq(transactions.id, id));
-  }
-  async clearTransactions(): Promise<void> {
-    await db.delete(transactions);
-  }
+  async deleteTransaction(id: number): Promise<void> { await db.delete(transactions).where(eq(transactions.id, id)); }
+  async clearTransactions(): Promise<void> { await db.delete(transactions); }
 
-  // ── Incomes ──────────────────────────────────────────────────────────────
-  async getIncomes(): Promise<Income[]> {
-    return db.select().from(incomes);
-  }
+  // ── Incomes
+  async getIncomes(): Promise<Income[]> { return db.select().from(incomes); }
   async createIncome(data: InsertIncome): Promise<Income> {
     const rows = await db.insert(incomes).values(data).returning();
     return rows[0];
@@ -158,14 +125,10 @@ export class DatabaseStorage {
     const rows = await db.update(incomes).set(data).where(eq(incomes.id, id)).returning();
     return rows[0];
   }
-  async deleteIncome(id: number): Promise<void> {
-    await db.delete(incomes).where(eq(incomes.id, id));
-  }
+  async deleteIncome(id: number): Promise<void> { await db.delete(incomes).where(eq(incomes.id, id)); }
 
-  // ── Expenses ─────────────────────────────────────────────────────────────
-  async getExpenses(): Promise<Expense[]> {
-    return db.select().from(expenses);
-  }
+  // ── Expenses
+  async getExpenses(): Promise<Expense[]> { return db.select().from(expenses); }
   async createExpense(data: InsertExpense): Promise<Expense> {
     const rows = await db.insert(expenses).values(data).returning();
     return rows[0];
@@ -174,14 +137,10 @@ export class DatabaseStorage {
     const rows = await db.update(expenses).set(data).where(eq(expenses.id, id)).returning();
     return rows[0];
   }
-  async deleteExpense(id: number): Promise<void> {
-    await db.delete(expenses).where(eq(expenses.id, id));
-  }
+  async deleteExpense(id: number): Promise<void> { await db.delete(expenses).where(eq(expenses.id, id)); }
 
-  // ── Assets ───────────────────────────────────────────────────────────────
-  async getAssets(): Promise<Asset[]> {
-    return db.select().from(assets);
-  }
+  // ── Assets
+  async getAssets(): Promise<Asset[]> { return db.select().from(assets); }
   async createAsset(data: InsertAsset): Promise<Asset> {
     const rows = await db.insert(assets).values(data).returning();
     return rows[0];
@@ -190,14 +149,10 @@ export class DatabaseStorage {
     const rows = await db.update(assets).set(data).where(eq(assets.id, id)).returning();
     return rows[0];
   }
-  async deleteAsset(id: number): Promise<void> {
-    await db.delete(assets).where(eq(assets.id, id));
-  }
+  async deleteAsset(id: number): Promise<void> { await db.delete(assets).where(eq(assets.id, id)); }
 
-  // ── Liabilities ──────────────────────────────────────────────────────────
-  async getLiabilities(): Promise<Liability[]> {
-    return db.select().from(liabilities);
-  }
+  // ── Liabilities
+  async getLiabilities(): Promise<Liability[]> { return db.select().from(liabilities); }
   async createLiability(data: InsertLiability): Promise<Liability> {
     const rows = await db.insert(liabilities).values(data).returning();
     return rows[0];
@@ -206,14 +161,10 @@ export class DatabaseStorage {
     const rows = await db.update(liabilities).set(data).where(eq(liabilities.id, id)).returning();
     return rows[0];
   }
-  async deleteLiability(id: number): Promise<void> {
-    await db.delete(liabilities).where(eq(liabilities.id, id));
-  }
+  async deleteLiability(id: number): Promise<void> { await db.delete(liabilities).where(eq(liabilities.id, id)); }
 
-  // ── Goals ────────────────────────────────────────────────────────────────
-  async getGoals(): Promise<Goal[]> {
-    return db.select().from(goals);
-  }
+  // ── Goals
+  async getGoals(): Promise<Goal[]> { return db.select().from(goals); }
   async createGoal(data: InsertGoal): Promise<Goal> {
     const rows = await db.insert(goals).values(data).returning();
     return rows[0];
@@ -222,14 +173,10 @@ export class DatabaseStorage {
     const rows = await db.update(goals).set(data).where(eq(goals.id, id)).returning();
     return rows[0];
   }
-  async deleteGoal(id: number): Promise<void> {
-    await db.delete(goals).where(eq(goals.id, id));
-  }
+  async deleteGoal(id: number): Promise<void> { await db.delete(goals).where(eq(goals.id, id)); }
 
-  // ── Time Entries ─────────────────────────────────────────────────────────
-  async getTimeEntries(): Promise<TimeEntry[]> {
-    return db.select().from(timeEntries);
-  }
+  // ── Time Entries
+  async getTimeEntries(): Promise<TimeEntry[]> { return db.select().from(timeEntries); }
   async createTimeEntry(data: InsertTimeEntry): Promise<TimeEntry> {
     const rows = await db.insert(timeEntries).values(data).returning();
     return rows[0];
@@ -238,9 +185,7 @@ export class DatabaseStorage {
     const rows = await db.update(timeEntries).set(data).where(eq(timeEntries.id, id)).returning();
     return rows[0];
   }
-  async deleteTimeEntry(id: number): Promise<void> {
-    await db.delete(timeEntries).where(eq(timeEntries.id, id));
-  }
+  async deleteTimeEntry(id: number): Promise<void> { await db.delete(timeEntries).where(eq(timeEntries.id, id)); }
 }
 
 export const storage = new DatabaseStorage();
