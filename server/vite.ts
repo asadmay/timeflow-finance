@@ -13,7 +13,6 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
@@ -39,7 +38,9 @@ export async function setupVite(httpServer: Server, app: Express) {
   });
 
   app.use(vite.middlewares);
-  app.use("*", async (req, res, next) => {
+
+  // Express 5: wildcard syntax changed from '*' to '/{*splat}'
+  app.use("/{*splat}", async (req, res, next) => {
     const url = req.originalUrl;
     try {
       const clientTemplate = path.resolve(
@@ -48,8 +49,6 @@ export async function setupVite(httpServer: Server, app: Express) {
         "client",
         "index.html",
       );
-
-      // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,
