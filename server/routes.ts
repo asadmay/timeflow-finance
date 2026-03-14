@@ -9,18 +9,21 @@ import {
 } from "../shared/schema";
 
 export async function registerRoutes(server: Server, app: Express) {
-  // ── Profile ────────────────────────────────────────────────────────────
+  // ── Profile ──────────────────────────────────────────────────────────
   app.get("/api/profile", async (_req, res) => {
     const p = await storage.getProfile();
     res.json(p);
   });
   app.put("/api/profile", async (req, res) => {
     const data = insertProfileSchema.partial().parse(req.body);
-    const p = await storage.updateProfile(data);
-    res.json(p);
+    res.json(await storage.updateProfile(data));
+  });
+  app.patch("/api/profile", async (req, res) => {
+    const data = insertProfileSchema.partial().parse(req.body);
+    res.json(await storage.updateProfile(data));
   });
 
-  // ── Accounts ──────────────────────────────────────────────────────────
+  // ── Accounts ─────────────────────────────────────────────────────────
   app.get("/api/accounts", async (_req, res) => {
     res.json(await storage.getAccounts());
   });
@@ -37,12 +40,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertAccountSchema.partial().parse(req.body);
     res.json(await storage.updateAccount(Number(req.params.id), data));
   });
+  app.patch("/api/accounts/:id", async (req, res) => {
+    const data = insertAccountSchema.partial().parse(req.body);
+    res.json(await storage.updateAccount(Number(req.params.id), data));
+  });
   app.delete("/api/accounts/:id", async (req, res) => {
     await storage.deleteAccount(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Deposits ──────────────────────────────────────────────────────────
+  // ── Deposits ─────────────────────────────────────────────────────────
   app.get("/api/deposits", async (_req, res) => {
     res.json(await storage.getDeposits());
   });
@@ -59,12 +66,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertDepositSchema.partial().parse(req.body);
     res.json(await storage.updateDeposit(Number(req.params.id), data));
   });
+  app.patch("/api/deposits/:id", async (req, res) => {
+    const data = insertDepositSchema.partial().parse(req.body);
+    res.json(await storage.updateDeposit(Number(req.params.id), data));
+  });
   app.delete("/api/deposits/:id", async (req, res) => {
     await storage.deleteDeposit(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Income Categories ─────────────────────────────────────────────────
+  // ── Income Categories ────────────────────────────────────────────────
   app.get("/api/income-categories", async (_req, res) => {
     res.json(await storage.getIncomeCategories());
   });
@@ -76,12 +87,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertIncomeCategorySchema.partial().parse(req.body);
     res.json(await storage.updateIncomeCategory(Number(req.params.id), data));
   });
+  app.patch("/api/income-categories/:id", async (req, res) => {
+    const data = insertIncomeCategorySchema.partial().parse(req.body);
+    res.json(await storage.updateIncomeCategory(Number(req.params.id), data));
+  });
   app.delete("/api/income-categories/:id", async (req, res) => {
     await storage.deleteIncomeCategory(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Expense Categories ────────────────────────────────────────────────
+  // ── Expense Categories ───────────────────────────────────────────────
   app.get("/api/expense-categories", async (_req, res) => {
     res.json(await storage.getExpenseCategories());
   });
@@ -93,12 +108,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertExpenseCategorySchema.partial().parse(req.body);
     res.json(await storage.updateExpenseCategory(Number(req.params.id), data));
   });
+  app.patch("/api/expense-categories/:id", async (req, res) => {
+    const data = insertExpenseCategorySchema.partial().parse(req.body);
+    res.json(await storage.updateExpenseCategory(Number(req.params.id), data));
+  });
   app.delete("/api/expense-categories/:id", async (req, res) => {
     await storage.deleteExpenseCategory(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Broker Positions ──────────────────────────────────────────────────
+  // ── Broker Positions ─────────────────────────────────────────────────
   app.get("/api/broker-positions", async (_req, res) => {
     res.json(await storage.getBrokerPositions());
   });
@@ -119,19 +138,24 @@ export async function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // ── Transactions ──────────────────────────────────────────────────────
+  // ── Transactions ─────────────────────────────────────────────────────
   app.get("/api/transactions", async (_req, res) => {
     res.json(await storage.getTransactions());
   });
   app.post("/api/transactions", async (req, res) => {
-    const data = insertTransactionSchema.parse(req.body);
+    // Strip unknown fields like 'description' before validation
+    const { description, ...rest } = req.body;
+    const data = insertTransactionSchema.parse({ ...rest, comment: description || rest.comment || "" });
     res.json(await storage.createTransaction(data));
   });
-  // Batch import — принимает массив транзакций (до 50 за раз)
+  // Batch import — принимает массив до 50 за раз
   app.post("/api/transactions/batch", async (req, res) => {
     const arr = req.body;
     if (!Array.isArray(arr)) return res.status(400).json({ message: "Expected array" });
-    const batch = arr.slice(0, 50).map((t: any) => insertTransactionSchema.parse(t));
+    const batch = arr.slice(0, 50).map((t: any) => {
+      const { description, ...rest } = t;
+      return insertTransactionSchema.parse({ ...rest, comment: description || rest.comment || "" });
+    });
     const rows = await storage.createTransactionsBatch(batch);
     res.json(rows);
   });
@@ -144,7 +168,45 @@ export async function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  // ── Incomes ───────────────────────────────────────────────────────────
+  // ── Import endpoint (Zen Money CSV) ─────────────────────────────────
+  app.post("/api/import/zenmoney", async (req, res) => {
+    const { transactions: txns = [], newIncomeCategories = [], newExpenseCategories = [], newAccounts = [] } = req.body;
+
+    // Create new categories
+    for (const name of newIncomeCategories) {
+      try { await storage.createIncomeCategory({ name, color: "#22c55e", icon: "trending-up", isDefault: false }); } catch {}
+    }
+    for (const name of newExpenseCategories) {
+      try { await storage.createExpenseCategory({ name, color: "#ef4444", icon: "trending-down", isDefault: false }); } catch {}
+    }
+    // Create new accounts
+    for (const acc of newAccounts) {
+      try { await storage.createAccount({ name: acc.name, type: acc.type || "card", balance: 0, currency: "RUB", color: "#6366f1", icon: "wallet", isArchived: false }); } catch {}
+    }
+
+    // Batch insert transactions by 50
+    let imported = 0;
+    const chunkSize = 50;
+    for (let i = 0; i < txns.length; i += chunkSize) {
+      const chunk = txns.slice(i, i + chunkSize).map((t: any) => ({
+        date: t.date,
+        type: t.type,
+        amount: t.amount,
+        currency: t.currency || "RUB",
+        categoryName: t.categoryName || "",
+        accountName: t.accountName || "",
+        payee: t.payee || "",
+        comment: t.description || t.comment || "",
+        source: t.source || "zenmoney",
+      }));
+      const rows = await storage.createTransactionsBatch(chunk);
+      imported += rows.length;
+    }
+
+    res.json({ imported, skipped: txns.length - imported });
+  });
+
+  // ── Incomes ──────────────────────────────────────────────────────────
   app.get("/api/incomes", async (_req, res) => {
     res.json(await storage.getIncomes());
   });
@@ -156,12 +218,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertIncomeSchema.partial().parse(req.body);
     res.json(await storage.updateIncome(Number(req.params.id), data));
   });
+  app.patch("/api/incomes/:id", async (req, res) => {
+    const data = insertIncomeSchema.partial().parse(req.body);
+    res.json(await storage.updateIncome(Number(req.params.id), data));
+  });
   app.delete("/api/incomes/:id", async (req, res) => {
     await storage.deleteIncome(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Expenses ──────────────────────────────────────────────────────────
+  // ── Expenses ─────────────────────────────────────────────────────────
   app.get("/api/expenses", async (_req, res) => {
     res.json(await storage.getExpenses());
   });
@@ -173,12 +239,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertExpenseSchema.partial().parse(req.body);
     res.json(await storage.updateExpense(Number(req.params.id), data));
   });
+  app.patch("/api/expenses/:id", async (req, res) => {
+    const data = insertExpenseSchema.partial().parse(req.body);
+    res.json(await storage.updateExpense(Number(req.params.id), data));
+  });
   app.delete("/api/expenses/:id", async (req, res) => {
     await storage.deleteExpense(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Assets ────────────────────────────────────────────────────────────
+  // ── Assets ───────────────────────────────────────────────────────────
   app.get("/api/assets", async (_req, res) => {
     res.json(await storage.getAssets());
   });
@@ -190,12 +260,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertAssetSchema.partial().parse(req.body);
     res.json(await storage.updateAsset(Number(req.params.id), data));
   });
+  app.patch("/api/assets/:id", async (req, res) => {
+    const data = insertAssetSchema.partial().parse(req.body);
+    res.json(await storage.updateAsset(Number(req.params.id), data));
+  });
   app.delete("/api/assets/:id", async (req, res) => {
     await storage.deleteAsset(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Liabilities ───────────────────────────────────────────────────────
+  // ── Liabilities ──────────────────────────────────────────────────────
   app.get("/api/liabilities", async (_req, res) => {
     res.json(await storage.getLiabilities());
   });
@@ -207,12 +281,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertLiabilitySchema.partial().parse(req.body);
     res.json(await storage.updateLiability(Number(req.params.id), data));
   });
+  app.patch("/api/liabilities/:id", async (req, res) => {
+    const data = insertLiabilitySchema.partial().parse(req.body);
+    res.json(await storage.updateLiability(Number(req.params.id), data));
+  });
   app.delete("/api/liabilities/:id", async (req, res) => {
     await storage.deleteLiability(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Goals ─────────────────────────────────────────────────────────────
+  // ── Goals ────────────────────────────────────────────────────────────
   app.get("/api/goals", async (_req, res) => {
     res.json(await storage.getGoals());
   });
@@ -224,12 +302,16 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertGoalSchema.partial().parse(req.body);
     res.json(await storage.updateGoal(Number(req.params.id), data));
   });
+  app.patch("/api/goals/:id", async (req, res) => {
+    const data = insertGoalSchema.partial().parse(req.body);
+    res.json(await storage.updateGoal(Number(req.params.id), data));
+  });
   app.delete("/api/goals/:id", async (req, res) => {
     await storage.deleteGoal(Number(req.params.id));
     res.json({ ok: true });
   });
 
-  // ── Time Entries ──────────────────────────────────────────────────────
+  // ── Time Entries ────────────────────────────────────────────────────
   app.get("/api/time-entries", async (_req, res) => {
     res.json(await storage.getTimeEntries());
   });
@@ -241,14 +323,12 @@ export async function registerRoutes(server: Server, app: Express) {
     const data = insertTimeEntrySchema.partial().parse(req.body);
     res.json(await storage.updateTimeEntry(Number(req.params.id), data));
   });
+  app.patch("/api/time-entries/:id", async (req, res) => {
+    const data = insertTimeEntrySchema.partial().parse(req.body);
+    res.json(await storage.updateTimeEntry(Number(req.params.id), data));
+  });
   app.delete("/api/time-entries/:id", async (req, res) => {
     await storage.deleteTimeEntry(Number(req.params.id));
     res.json({ ok: true });
-  });
-
-  // ── Error handler ─────────────────────────────────────────────────────
-  app.use((err: any, _req: any, res: any, _next: any) => {
-    console.error(err);
-    res.status(500).json({ message: err.message || "Internal Server Error" });
   });
 }
