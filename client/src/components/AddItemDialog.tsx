@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,10 @@ export interface FieldDef {
 
 interface AddItemDialogProps {
   open: boolean;
-  onClose: () => void;
+  /** Called when dialog should close */
+  onClose?: () => void;
+  /** Alternative to onClose — Radix-style */
+  onOpenChange?: (open: boolean) => void;
   title: string;
   fields: FieldDef[];
   onSubmit: (data: Record<string, any>) => void;
@@ -24,11 +27,31 @@ interface AddItemDialogProps {
   isLoading?: boolean;
 }
 
-export default function AddItemDialog({ open, onClose, title, fields, onSubmit, initialValues, isLoading }: AddItemDialogProps) {
+export default function AddItemDialog({
+  open,
+  onClose,
+  onOpenChange,
+  title,
+  fields,
+  onSubmit,
+  initialValues,
+  isLoading,
+}: AddItemDialogProps) {
   const [values, setValues] = useState<Record<string, any>>(initialValues ?? {});
 
-  const handleOpen = (isOpen: boolean) => {
-    if (!isOpen) { onClose(); setValues(initialValues ?? {}); }
+  // Sync values when initialValues change (edit mode)
+  useEffect(() => {
+    setValues(initialValues ?? {});
+  }, [open]);
+
+  const handleClose = () => {
+    onClose?.();
+    onOpenChange?.(false);
+    setValues(initialValues ?? {});
+  };
+
+  const handleOpenChange = (isOpen: boolean) => {
+    if (!isOpen) handleClose();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -42,8 +65,11 @@ export default function AddItemDialog({ open, onClose, title, fields, onSubmit, 
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogContent className="bg-card border-border/60 text-foreground max-w-sm">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="bg-card border-border/60 text-foreground max-w-sm"
+        aria-describedby={undefined}
+      >
         <DialogHeader>
           <DialogTitle className="text-foreground">{title}</DialogTitle>
         </DialogHeader>
@@ -82,7 +108,7 @@ export default function AddItemDialog({ open, onClose, title, fields, onSubmit, 
             <Button
               type="button"
               variant="outline"
-              onClick={onClose}
+              onClick={handleClose}
               className="flex-1 border-border/40 text-muted-foreground hover:text-foreground"
             >
               Отмена
