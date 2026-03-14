@@ -1,73 +1,185 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState } from "react";
-import { Search, Trash2, Filter } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Trash2, Search, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/PageHeader";
 import type { Transaction } from "@shared/schema";
 
-const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n / 100);
+const TYPE_LABEL: Record<string, string> = {
+  income: "Доход",
+  expense: "Расход",
+  transfer: "Перевод",
+};
 
 export default function TransactionsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
 
-  const { data: transactions = [], isLoading } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
+  const { data: transactions = [], isLoading } = useQuery<Transaction[]>({
+    queryKey: ["/api/transactions"],
+  });
 
-  const remove = useMutation({ mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/transactions"] }) });
-  const clearAll = useMutation({ mutationFn: () => apiRequest("DELETE", "/api/transactions"), onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/transactions"] }) });
+  const remove = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/transactions"] }),
+  });
 
-  const filtered = transactions.filter(t => {
-    if (filterType !== "all" && t.type !== filterType) return false;
+  const filtered = transactions.filter((t) => {
+    if (typeFilter !== "all" && t.type !== typeFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return (t.payee || "").toLowerCase().includes(q) || (t.comment || "").toLowerCase().includes(q) || (t.categoryName || "").toLowerCase().includes(q);
+      return (
+        t.categoryName.toLowerCase().includes(q) ||
+        t.accountName.toLowerCase().includes(q) ||
+        t.payee.toLowerCase().includes(q) ||
+        t.comment.toLowerCase().includes(q)
+      );
     }
     return true;
   });
+
+  const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n / 100);
+
+  // Group by date
+  const groups: Record<string, Transaction[]> = {};
+  for (const t of filtered) {
+    const d = t.date.substring(0, 10);
+    if (!groups[d]) groups[d] = [];
+    groups[d].push(t);
+  }
+  const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
 
   const totalIncome = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
   return (
     <>
-      <PageHeader title="Транзакции" totalDisplay={`${transactions.length} записей`}
-        action={transactions.length > 0 ? <Button size="sm" variant="destructive" onClick={() => clearAll.mutate()} className="h-8 px-3 text-xs" data-testid="clear-transactions">Очистить всё</Button> : undefined}
+      <PageHeader
+        title="Транзакции"
+        totalDisplay={`${transactions.length} записей`}
       />
+
+      {/* Summary */}
       {transactions.length > 0 && (
-        <div className="flex gap-2 mb-4">
-          <div className="flex gap-1 flex-1">
-            {(["all", "income", "expense"] as const).map(type => (
-              <button key={type} onClick={() => setFilterType(type)}
-                className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${filterType === type ? (type === "income" ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" : type === "expense" ? "bg-red-500/15 border-red-500/30 text-red-400" : "bg-muted border-border/50 text-foreground") : "border-border/20 text-muted-foreground"}`}>
-                {type === "all" ? "Все" : type === "income" ? "Доходы" : "Расходы"}
-              </button>
-            ))}
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
+            <div className="text-xs text-muted-foreground mb-0.5">Доходы</div>
+            <div className="font-mono font-semibold text-emerald-400 text-sm">+{fmt(totalIncome)} ₽</div>
           </div>
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск..." className="pl-7 h-8 text-xs bg-muted/30 border-border/30" />
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+            <div className="text-xs text-muted-foreground mb-0.5">Расходы</div>
+            <div className="font-mono font-semibold text-red-400 text-sm">−{fmt(totalExpense)} ₽</div>
           </div>
         </div>
       )}
-      {isLoading ? <div className="space-y-1">{[1,2,3,4,5].map(i => <div key={i} className="h-8 bg-muted/50 rounded animate-pulse" />)}</div>
-      : transactions.length === 0 ? <div className="text-center py-12 text-muted-foreground"><div className="text-sm">Нет транзакций</div><div className="text-xs mt-1">Загрузите файл на странице Импорт</div></div>
-      : (
-        <div className="space-y-0.5">
-          {filtered.slice(0, 200).map(t => (
-            <div key={t.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/30 group text-xs">
-              <span className="text-muted-foreground font-mono w-20 flex-shrink-0">{t.date.substring(0, 10)}</span>
-              <span className="flex-1 truncate text-foreground/80">{t.payee || t.comment || "—"}</span>
-              {t.categoryName && <span className="text-muted-foreground/60 truncate max-w-[80px]">{t.categoryName}</span>}
-              <span className={`font-mono font-semibold flex-shrink-0 ${t.type === "income" ? "text-emerald-400" : "text-red-400"}`}>{t.type === "income" ? "+" : "−"}{fmt(t.amount)} ₽</span>
-              <button onClick={() => remove.mutate(t.id)} className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-muted-foreground transition-all"><Trash2 className="w-3 h-3" /></button>
+
+      {/* Filters */}
+      <div className="flex gap-2 mb-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Поиск..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-8 h-8 text-xs bg-muted/30 border-border/30"
+          />
+        </div>
+        <div className="flex gap-1">
+          {(["all", "income", "expense", "transfer"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={`text-xs px-2.5 h-8 rounded-lg border transition-colors ${
+                typeFilter === t
+                  ? "bg-yellow-500/20 border-yellow-500/40 text-yellow-400"
+                  : "border-border/30 text-muted-foreground hover:border-border/60"
+              }`}
+            >
+              {t === "all" ? "Все" : TYPE_LABEL[t]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-12 bg-muted/50 rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : transactions.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <ArrowLeftRight className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <div className="text-sm">Нет транзакций</div>
+          <div className="text-xs mt-1">Импортируйте данные из Дзен Мани</div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-10 text-muted-foreground text-sm">
+          Ничего не найдено
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {sortedDates.map((date) => (
+            <div key={date}>
+              <div className="text-xs text-muted-foreground font-medium mb-1.5 px-1">
+                {formatDate(date)}
+              </div>
+              <div className="rounded-xl border border-border/30 overflow-hidden">
+                {groups[date].map((t) => (
+                  <div
+                    key={t.id}
+                    className="flex items-center gap-2.5 px-3 py-2.5 border-b border-border/15 last:border-0 hover:bg-muted/20 transition-colors group"
+                    data-testid={`tx-${t.id}`}
+                  >
+                    <TxIcon type={t.type} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium text-foreground/90 truncate">
+                        {t.categoryName || t.payee || t.comment || "—"}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {t.accountName}
+                        {t.type === "transfer" && t.payee ? ` → ${t.payee}` : ""}
+                        {t.comment && t.type !== "transfer" ? ` · ${t.comment}` : ""}
+                      </div>
+                    </div>
+                    <div className={`font-mono text-xs font-semibold flex-shrink-0 ${
+                      t.type === "income" ? "text-emerald-400" :
+                      t.type === "expense" ? "text-red-400" : "text-muted-foreground"
+                    }`}>
+                      {t.type === "income" ? "+" : t.type === "expense" ? "−" : "↔"}
+                      {fmt(t.amount)} ₽
+                    </div>
+                    <button
+                      onClick={() => remove.mutate(t.id)}
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all ml-1"
+                      data-testid={`delete-tx-${t.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
-          {filtered.length > 200 && <div className="text-center py-2 text-xs text-muted-foreground">... ещё {filtered.length - 200} записей</div>}
         </div>
       )}
     </>
   );
+}
+
+function TxIcon({ type }: { type: string }) {
+  if (type === "income") return <ArrowDownCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />;
+  if (type === "expense") return <ArrowUpCircle className="w-5 h-5 text-red-400 flex-shrink-0" />;
+  return <ArrowLeftRight className="w-5 h-5 text-cyan-400 flex-shrink-0" />;
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+  } catch { return dateStr; }
 }

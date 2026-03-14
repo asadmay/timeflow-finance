@@ -1,13 +1,15 @@
 interface CategorySectionProps {
-  category: string;
+  title: string;
   children: React.ReactNode;
+  empty?: boolean;
 }
 
-export default function CategorySection({ category, children }: CategorySectionProps) {
+export default function CategorySection({ title, children, empty }: CategorySectionProps) {
+  if (empty) return null;
   return (
     <div className="mb-4">
-      <div className="category-label px-1 mb-1.5">{category || "Прочее"}</div>
-      <div className="rounded-xl border border-border/30 overflow-hidden">
+      <div className="category-label mb-2 px-3">{title}</div>
+      <div className="space-y-0.5">
         {children}
       </div>
     </div>
