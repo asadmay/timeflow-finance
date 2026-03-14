@@ -26,7 +26,7 @@ type ParseResult = {
 };
 
 function parseAmount(raw: string): number {
-  return parseFloat(raw.replace(/\s/g, "").replace(",", ".")) || 0;
+  return parseFloat(raw.replace(/[\s\u00a0]/g, "").replace(",", ".")) || 0;
 }
 
 function parseCsvLine(raw: string): string[] {
@@ -48,21 +48,24 @@ function parseCsvText(
   existingExpenseCats: string[],
   existingAccounts: string[]
 ): ParseResult {
-  let lines = text.trim().split(/\r?\n/);
+  // Убираем BOM (если есть)
+  const cleaned = text.replace(/^\uFEFF/, "");
+  const allLines = cleaned.split(/\r?\n/);
   const errors: string[] = [];
+
+  // Если первая строка — служебный заголовок zm_dump, пропускаем его и все пустые строки после
+  let startIdx = 0;
+  if (allLines[0].replace(/^\uFEFF/, "").toLowerCase().startsWith("zm_dump")) {
+    startIdx = 1;
+    while (startIdx < allLines.length && !allLines[startIdx].trim()) startIdx++;
+  }
+
+  const lines = allLines.slice(startIdx);
 
   if (lines.length < 2)
     return { rows: [], skippedTransfers: 0, newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст"] };
 
-  // Пропускаем служебную строку Дзенмани zm_dump_XXXX
-  if (lines[0].toLowerCase().startsWith("zm_dump")) {
-    lines = lines.slice(1);
-  }
-
-  if (lines.length < 2)
-    return { rows: [], skippedTransfers: 0, newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст после заголовка"] };
-
-  const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, ""));
+  const headers = parseCsvLine(lines[0]).map(h => h.replace(/^\uFEFF/, "").toLowerCase().replace(/["']/g, "").trim());
   const idx = (name: string) => headers.indexOf(name);
 
   const isZenFormat = idx("date") !== -1 && (idx("outcome") !== -1 || idx("income") !== -1);
