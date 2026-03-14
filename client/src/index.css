@@ -6,26 +6,39 @@
   :root {
     --font-sans: 'Inter', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
+    /* Dark gaming finance theme — deep navy/slate with gold accents */
     --background: 222 20% 8%;
     --foreground: 210 20% 92%;
+
     --card: 222 18% 11%;
     --card-foreground: 210 20% 92%;
+
     --popover: 222 18% 11%;
     --popover-foreground: 210 20% 92%;
+
+    /* Gold accent */
     --primary: 43 90% 56%;
     --primary-foreground: 222 20% 8%;
+
     --secondary: 222 15% 16%;
     --secondary-foreground: 210 15% 70%;
+
     --muted: 222 15% 14%;
     --muted-foreground: 215 12% 50%;
+
     --accent: 222 15% 18%;
     --accent-foreground: 210 20% 92%;
+
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 20% 92%;
+
     --border: 222 15% 18%;
     --input: 222 15% 14%;
     --ring: 43 90% 56%;
+
     --radius: 0.75rem;
+
+    /* Semantic colors */
     --color-income: 142 71% 45%;
     --color-expense: 0 72% 51%;
     --color-asset: 199 89% 48%;
@@ -38,49 +51,78 @@
 }
 
 @layer base {
-  * { @apply border-border; }
+  * {
+    @apply border-border;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
+/* Custom scrollbar */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
-.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+/* Number font */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
 
+/* Glow effects */
 .glow-gold { box-shadow: 0 0 20px hsl(43 90% 56% / 0.15); }
 .glow-green { box-shadow: 0 0 20px hsl(142 71% 45% / 0.15); }
 .glow-red { box-shadow: 0 0 20px hsl(0 72% 51% / 0.15); }
 
+/* Nav tab active */
 .nav-tab-active {
   background: linear-gradient(135deg, hsl(43 90% 56% / 0.15), hsl(43 90% 56% / 0.05));
   border-left: 2px solid hsl(43 90% 56%);
 }
 
+/* Animated counter */
 @keyframes countUp {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .count-animate { animation: countUp 0.3s ease-out; }
 
+/* Category header */
 .category-label {
   @apply text-xs font-semibold uppercase tracking-widest;
   color: hsl(var(--muted-foreground));
 }
 
+/* Value positive/negative */
 .val-pos { color: hsl(var(--color-income)); }
 .val-neg { color: hsl(var(--color-expense)); }
 .val-neutral { color: hsl(var(--foreground)); }
 
-.item-card { @apply transition-all duration-200; }
-.item-card:hover { background: hsl(var(--accent)); transform: translateX(2px); }
+/* Card hover */
+.item-card {
+  @apply transition-all duration-200;
+}
+.item-card:hover {
+  background: hsl(var(--accent));
+  transform: translateX(2px);
+}
 
-.progress-gold { background: linear-gradient(90deg, hsl(43 90% 56%), hsl(43 90% 70%)); }
-.progress-green { background: linear-gradient(90deg, hsl(142 71% 45%), hsl(142 71% 55%)); }
+/* Progress bar gradient */
+.progress-gold {
+  background: linear-gradient(90deg, hsl(43 90% 56%), hsl(43 90% 70%));
+}
+.progress-green {
+  background: linear-gradient(90deg, hsl(142 71% 45%), hsl(142 71% 55%));
+}
 
-.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-.scrollbar-hide::-webkit-scrollbar { display: none; }
+/* Scrollbar hide utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

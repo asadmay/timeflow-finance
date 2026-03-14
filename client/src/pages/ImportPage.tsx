@@ -1,252 +1,351 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Upload, FileText, CheckCircle, AlertCircle, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Upload, FileText, CheckCircle, AlertCircle, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/components/PageHeader";
-import type { IncomeCategory, ExpenseCategory, Account } from "@shared/schema";
-import * as XLSX from "xlsx";
+import type { Transaction } from "@shared/schema";
 
-interface ParsedTransaction {
-  date: string; type: "income" | "expense" | "transfer";
-  amount: number; currency: string; categoryName: string;
-  accountName: string; payee: string; comment: string;
-}
-interface BrokerPosition {
-  ticker: string; isin: string; name: string; quantity: number;
-  avgPrice: number; currentPrice: number; currency: string; type: string; broker: string;
-}
-interface ImportPreview {
-  transactions: ParsedTransaction[];
-  newIncomeCategories: string[]; newExpenseCategories: string[];
-  newAccounts: { name: string; type: string }[];
-}
-interface BrokerPreview {
-  broker: "vtb" | "sber" | "other"; accountName: string;
-  positions: BrokerPosition[]; totalValue: number;
-}
+const EXPECTED_COLS = ["date", "type", "category", "account", "amount", "description"];
 
-function parseZenMoneyCsv(text: string): ParsedTransaction[] {
-  const cleaned = text.replace(/^\uFEFF/, "");
-  const lines = cleaned.split("\n");
-  let headerIdx = -1;
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    if (lines[i].includes("date") && lines[i].includes("categoryName")) { headerIdx = i; break; }
+type ZenRow = {
+  date: string;
+  type: "income" | "expense";
+  category: string;
+  account: string;
+  amount: string;
+  description?: string;
+};
+
+type ParseResult = {
+  rows: ZenRow[];
+  newIncomeCategories: string[];
+  newExpenseCategories: string[];
+  newAccounts: Array<{ name: string; type: string }>;
+  errors: string[];
+};
+
+function parseCsvText(text: string, existingIncomeCats: string[], existingExpenseCats: string[], existingAccounts: string[]): ParseResult {
+  const lines = text.trim().split(/\r?\n/);
+  const errors: string[] = [];
+
+  if (lines.length < 2) return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст или содержит только заголовок"] };
+
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/["']/g, ""));
+  const missing = EXPECTED_COLS.filter(c => !headers.includes(c));
+  if (missing.length > 0) {
+    return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: [`Отсутствуют столбцы: ${missing.join(", ")}`] };
   }
-  if (headerIdx === -1) throw new Error("Не найден заголовок файла");
-  const dataText = lines.slice(headerIdx).join("\n");
-  function parseCsvRow(line: string): string[] {
-    const result: string[] = []; let cur = ""; let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { if (inQuotes && line[i+1] === '"') { cur += '"'; i++; } else { inQuotes = !inQuotes; } }
-      else if (ch === "," && !inQuotes) { result.push(cur); cur = ""; }
-      else { cur += ch; }
+
+  const idx = (col: string) => headers.indexOf(col);
+  const newIncomeCategories = new Set<string>();
+  const newExpenseCategories = new Set<string>();
+  const newAccounts = new Map<string, string>();
+  const rows: ZenRow[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw.trim()) continue;
+
+    // Simple CSV parse (handles quoted fields with commas)
+    const cols: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (const ch of raw) {
+      if (ch === '"') { inQ = !inQ; continue; }
+      if (ch === "," && !inQ) { cols.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
     }
-    result.push(cur); return result;
-  }
-  const allLines = dataText.split("\n").filter(l => l.trim());
-  const headers = parseCsvRow(allLines[0]).map(h => h.trim());
-  const col = (row: string[], name: string) => { const idx = headers.indexOf(name); return idx >= 0 ? (row[idx] || "").trim() : ""; };
-  function parseRuNum(s: string): number { return parseFloat(s.replace(/\s/g, "").replace(",", ".")) || 0; }
-  const txns: ParsedTransaction[] = [];
-  for (let i = 1; i < allLines.length; i++) {
-    const row = parseCsvRow(allLines[i]);
-    if (row.length < 5) continue;
-    const date = col(row, "date");
-    if (!date || !/^\d{4}-\d{2}-\d{2}/.test(date)) continue;
-    const outcomeRaw = parseRuNum(col(row, "outcome"));
-    const incomeRaw = parseRuNum(col(row, "income"));
-    const category = col(row, "categoryName") || "Прочее";
-    const payee = col(row, "payee"); const comment = col(row, "comment");
-    const outcomeAccount = col(row, "outcomeAccountName"); const incomeAccount = col(row, "incomeAccountName");
-    const outCurrency = col(row, "outcomeCurrencyShortTitle") || "RUB";
-    const inCurrency = col(row, "incomeCurrencyShortTitle") || "RUB";
-    if (outcomeRaw > 0 && incomeRaw > 0) {
-      txns.push({ date: date.substring(0,10), type: "transfer", amount: Math.round(outcomeRaw*100), currency: outCurrency, categoryName: category || "Перевод", accountName: outcomeAccount, payee: incomeAccount, comment });
-    } else if (outcomeRaw > 0) {
-      txns.push({ date: date.substring(0,10), type: "expense", amount: Math.round(outcomeRaw*100), currency: outCurrency, categoryName: category, accountName: outcomeAccount, payee, comment });
-    } else if (incomeRaw > 0) {
-      txns.push({ date: date.substring(0,10), type: "income", amount: Math.round(incomeRaw*100), currency: inCurrency, categoryName: category, accountName: incomeAccount, payee, comment });
-    }
-  }
-  return txns;
-}
+    cols.push(cur.trim());
 
-function parseVtbXls(buffer: ArrayBuffer): { positions: BrokerPosition[]; totalValue: number } {
-  const workbook = XLSX.read(buffer, { type: "array" });
-  const sheetName = workbook.SheetNames.find(s => s === "Брокер_отчет") || workbook.SheetNames.find(s => s === "brokerage_report") || workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const positions: BrokerPosition[] = []; let totalValue = 0;
-  let inSecuritiesSection = false; let currentType = "stock"; let formatDetected: "A" | "B" | null = null;
-  const clean = (v: any): string => (v != null ? String(v).trim() : "");
-  const num = (v: any): number => { if (v == null) return 0; const s = String(v).replace(/\s/g, "").replace(",", "."); return parseFloat(s) || 0; };
-  const isSecurityName = (s: string) => s.length > 3 && !s.includes("Отчет") && !s.includes("Наименование") && !s.includes("Движение") && s !== "АКЦИЯ" && s !== "ОБЛИГАЦИЯ" && !s.startsWith("ИТОГО");
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]; if (!row) continue;
-    const c0 = clean(row[0]); const c1 = clean(row[1]);
-    if (c0.includes("Отчет об остатках") || c1.includes("Отчет об остатках")) { inSecuritiesSection = true; continue; }
-    if (!inSecuritiesSection) continue;
-    if (c0.includes("Наименование ценной") || c1.includes("Наименование ценной")) continue;
-    if (c0.includes("Движение") || c1.includes("Движение")) break;
-    const typeCandidate = c0 || c1;
-    if (typeCandidate === "АКЦИЯ") { currentType = "stock"; continue; }
-    if (typeCandidate === "ОБЛИГАЦИЯ") { currentType = "bond"; continue; }
-    if (typeCandidate === "ПИФ" || typeCandidate.includes("ФОНД")) { currentType = "fund"; continue; }
-    if (typeCandidate === "ИТОГО:" || typeCandidate === "ИТОГО") { for (let c = row.length-1; c >= 0; c--) { const v = num(row[c]); if (v > 100) { totalValue = v; break; } } break; }
-    if (formatDetected === null) { if (isSecurityName(c0)) formatDetected = "A"; else if (isSecurityName(c1)) formatDetected = "B"; else continue; }
-    let nameCell: string; let qty: number; let price: number; let valuation: number;
-    if (formatDetected === "A") { nameCell = c0; if (!isSecurityName(nameCell)) continue; qty = num(row[19]); price = num(row[31]); valuation = num(row[55]) || num(row[51]); }
-    else { nameCell = c1; if (!isSecurityName(nameCell)) continue; qty = num(row[11]); price = num(row[15]); valuation = num(row[27]) || num(row[31]); }
-    if (qty <= 0) continue;
-    const parts = nameCell.split(",").map(p => p.trim());
-    const name = parts[0] || nameCell;
-    const isin = parts.find(p => /^[A-Z]{2}[A-Z0-9]{10}$/.test(p)) || "";
-    const currentPrice = qty > 0 && valuation > 0 ? valuation / qty : price;
-    totalValue += valuation;
-    positions.push({ ticker: "", isin, name, quantity: qty, avgPrice: price, currentPrice, currency: "RUB", type: currentType, broker: "vtb" });
+    const date = cols[idx("date")]?.trim();
+    const type = cols[idx("type")]?.trim().toLowerCase() as "income" | "expense";
+    const category = cols[idx("category")]?.trim() || "Прочее";
+    const account = cols[idx("account")]?.trim() || "Основной";
+    const amountStr = cols[idx("amount")]?.trim().replace(/[^\d.,-]/g, "").replace(",", ".");
+    const description = cols[idx("description")]?.trim();
+
+    if (!date || !type || !amountStr) {
+      errors.push(`Строка ${i + 1}: пропущены обязательные поля`);
+      continue;
+    }
+    if (type !== "income" && type !== "expense") {
+      errors.push(`Строка ${i + 1}: тип должен быть income или expense`);
+      continue;
+    }
+
+    const amountFloat = parseFloat(amountStr);
+    if (isNaN(amountFloat) || amountFloat <= 0) {
+      errors.push(`Строка ${i + 1}: некорректная сумма "${amountStr}"`);
+      continue;
+    }
+
+    // Track new categories
+    if (type === "income" && !existingIncomeCats.includes(category)) {
+      newIncomeCategories.add(category);
+    }
+    if (type === "expense" && !existingExpenseCats.includes(category)) {
+      newExpenseCategories.add(category);
+    }
+
+    // Track new accounts
+    if (!existingAccounts.includes(account) && !newAccounts.has(account)) {
+      newAccounts.set(account, "card");
+    }
+
+    rows.push({ date, type, category, account, amount: amountStr, description });
   }
-  return { positions, totalValue };
+
+  return {
+    rows,
+    newIncomeCategories: Array.from(newIncomeCategories),
+    newExpenseCategories: Array.from(newExpenseCategories),
+    newAccounts: Array.from(newAccounts.entries()).map(([name, type]) => ({ name, type })),
+    errors,
+  };
 }
 
 export default function ImportPage() {
-  const qc = useQueryClient(); const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<"zenmoney" | "vtb" | "sber">("zenmoney");
-  const [zenPreview, setZenPreview] = useState<ImportPreview | null>(null);
-  const [brokerPreview, setBrokerPreview] = useState<BrokerPreview | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const [parseError, setParseError] = useState("");
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [fileName, setFileName] = useState("");
-  const { data: incomeCats = [] } = useQuery<IncomeCategory[]>({ queryKey: ["/api/income-categories"] });
-  const { data: expenseCats = [] } = useQuery<ExpenseCategory[]>({ queryKey: ["/api/expense-categories"] });
-  const { data: accounts = [] } = useQuery<Account[]>({ queryKey: ["/api/accounts"] });
-  const importZen = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/import/zenmoney", data),
-    onSuccess: (data: any) => { qc.invalidateQueries({ queryKey: ["/api/transactions"] }); qc.invalidateQueries({ queryKey: ["/api/accounts"] }); qc.invalidateQueries({ queryKey: ["/api/income-categories"] }); qc.invalidateQueries({ queryKey: ["/api/expense-categories"] }); setZenPreview(null); setFileName(""); toast({ description: `Импортировано ${data.imported} транзакций` }); },
-    onError: (e: any) => toast({ description: `Ошибка: ${e.message}`, variant: "destructive" }),
+  const [dragOver, setDragOver] = useState(false);
+
+  const { data: incomeCats = [] } = useQuery({ queryKey: ["/api/income-categories"] });
+  const { data: expenseCats = [] } = useQuery({ queryKey: ["/api/expense-categories"] });
+  const { data: accounts = [] } = useQuery({ queryKey: ["/api/accounts"] });
+
+  const existingIncomeCats = (incomeCats as any[]).map((c: any) => c.name);
+  const existingExpenseCats = (expenseCats as any[]).map((c: any) => c.name);
+  const existingAccounts = (accounts as any[]).map((a: any) => a.name);
+
+  const importMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      return apiRequest("POST", "/api/import/zenmoney", payload);
+    },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["/api/transactions"] });
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      qc.invalidateQueries({ queryKey: ["/api/income-categories"] });
+      qc.invalidateQueries({ queryKey: ["/api/expense-categories"] });
+    },
   });
-  const importBroker = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/import/broker", data),
-    onSuccess: (data: any) => { qc.invalidateQueries({ queryKey: ["/api/broker-positions"] }); qc.invalidateQueries({ queryKey: ["/api/accounts"] }); setBrokerPreview(null); setFileName(""); toast({ description: `Импортировано ${data.imported} позиций` }); },
-    onError: (e: any) => toast({ description: `Ошибка: ${e.message}`, variant: "destructive" }),
-  });
-  async function handleFile(file: File) {
-    setParseError(""); setZenPreview(null); setBrokerPreview(null); setFileName(file.name);
-    try {
-      if (tab === "zenmoney") {
-        const text = await file.text();
-        const txns = parseZenMoneyCsv(text);
-        if (txns.length === 0) { setParseError("Транзакций не найдено."); return; }
-        const existingInCatNames = new Set(incomeCats.map(c => c.name));
-        const existingExCatNames = new Set(expenseCats.map(c => c.name));
-        const existingAccountNames = new Set(accounts.map(a => a.name));
-        const newInCats = new Set<string>(); const newExCats = new Set<string>(); const newAccs = new Set<string>();
-        for (const t of txns) {
-          if (t.type === "income" && t.categoryName && !existingInCatNames.has(t.categoryName)) newInCats.add(t.categoryName);
-          if (t.type === "expense" && t.categoryName && !existingExCatNames.has(t.categoryName)) newExCats.add(t.categoryName);
-          if (t.accountName && !existingAccountNames.has(t.accountName)) newAccs.add(t.accountName);
-          if (t.payee && t.type === "transfer" && !existingAccountNames.has(t.payee)) newAccs.add(t.payee);
-        }
-        setZenPreview({ transactions: txns, newIncomeCategories: Array.from(newInCats), newExpenseCategories: Array.from(newExCats), newAccounts: Array.from(newAccs).map(name => ({ name, type: "card" })) });
-      } else {
-        const broker = tab as "vtb" | "sber";
-        const buffer = await file.arrayBuffer();
-        const { positions, totalValue } = parseVtbXls(buffer);
-        if (positions.length === 0) { setParseError("Позиций не найдено."); return; }
-        setBrokerPreview({ broker, accountName: broker === "vtb" ? "ВТБ ИИС" : "Сбер Брокер", positions, totalValue });
-      }
-    } catch (err: any) { setParseError(`Ошибка разбора файла: ${err.message}`); }
-  }
-  function confirmZenImport() {
-    if (!zenPreview) return;
-    importZen.mutate({ transactions: zenPreview.transactions.map(t => ({ ...t, source: "zenmoney" })), newIncomeCategories: zenPreview.newIncomeCategories, newExpenseCategories: zenPreview.newExpenseCategories, newAccounts: zenPreview.newAccounts });
-  }
-  function confirmBrokerImport() {
-    if (!brokerPreview) return;
-    importBroker.mutate({ broker: brokerPreview.broker, accountName: brokerPreview.accountName, positions: brokerPreview.positions.map(p => ({ ...p, accountId: null })), totalValue: brokerPreview.totalValue });
-  }
-  function resetFile() { setFileName(""); setZenPreview(null); setBrokerPreview(null); setParseError(""); if (fileInputRef.current) fileInputRef.current.value = ""; }
-  const incomeCount = zenPreview?.transactions.filter(t => t.type === "income").length ?? 0;
-  const expenseCount = zenPreview?.transactions.filter(t => t.type === "expense").length ?? 0;
-  const transferCount = zenPreview?.transactions.filter(t => t.type === "transfer").length ?? 0;
+
+  const handleFile = (file: File) => {
+    if (!file.name.endsWith(".csv")) {
+      alert("Только .csv файлы");
+      return;
+    }
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const result = parseCsvText(text, existingIncomeCats, existingExpenseCats, existingAccounts);
+      setParsed(result);
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  const handleImport = () => {
+    if (!parsed || parsed.rows.length === 0) return;
+
+    const transactions = parsed.rows.map(row => ({
+      date: row.date,
+      type: row.type,
+      categoryName: row.category,
+      accountName: row.account,
+      amount: Math.round(parseFloat(row.amount.replace(",", ".")) * 100),
+      description: row.description || null,
+      currency: "RUB",
+    }));
+
+    importMutation.mutate({
+      transactions,
+      newIncomeCategories: parsed.newIncomeCategories,
+      newExpenseCategories: parsed.newExpenseCategories,
+      newAccounts: parsed.newAccounts,
+    });
+  };
+
+  const downloadTemplate = () => {
+    const header = EXPECTED_COLS.join(",");
+    const example = "2024-01-15,income,Зарплата,Сбербанк,75000,Зарплата январь";
+    const csv = `${header}\n${example}\n`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const isSuccess = importMutation.isSuccess;
+  const importData = importMutation.data as any;
+
   return (
     <>
-      <PageHeader title="Импорт" totalDisplay="" />
-      <Tabs value={tab} onValueChange={v => { setTab(v as any); resetFile(); }}>
-        <TabsList className="bg-muted/50 border border-border/30 w-full h-9 mb-5">
-          <TabsTrigger value="zenmoney" className="flex-1 text-xs data-[state=active]:bg-card" data-testid="tab-zenmoney">Дзен Мани</TabsTrigger>
-          <TabsTrigger value="vtb" className="flex-1 text-xs data-[state=active]:bg-card" data-testid="tab-vtb">ВТБ Брокер</TabsTrigger>
-          <TabsTrigger value="sber" className="flex-1 text-xs data-[state=active]:bg-card" data-testid="tab-sber">Сбер</TabsTrigger>
-        </TabsList>
-        <TabsContent value="zenmoney">
-          <div className="space-y-4">
-            <div className="rounded-xl bg-muted/20 border border-border/30 p-4 text-xs text-muted-foreground">
-              <div className="font-medium text-foreground/80 mb-2">Экспорт из Дзен Мани</div>
-              <div>Настройки → Экспорт данных → CSV (.csv с запятой)</div>
+      <PageHeader title="Импорт" total={0} totalDisplay="" />
+
+      {/* Template download */}
+      <div className="mb-4">
+        <button
+          onClick={downloadTemplate}
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Скачать шаблон CSV
+        </button>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        className={cn(
+          "border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer mb-4",
+          dragOver ? "border-yellow-400 bg-yellow-400/5" : "border-border/40 hover:border-border/80"
+        )}
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const f = e.dataTransfer.files[0];
+          if (f) handleFile(f);
+        }}
+      >
+        <Upload className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
+        <div className="text-sm font-medium text-foreground mb-1">Перетащите CSV файл</div>
+        <div className="text-xs text-muted-foreground">или нажмите для выбора</div>
+      </div>
+
+      <input ref={fileRef} type="file" accept=".csv" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+      />
+
+      {/* File info */}
+      {fileName && (
+        <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-muted/30 border border-border/30">
+          <FileText className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm text-foreground flex-1">{fileName}</span>
+          <button onClick={() => { setParsed(null); setFileName(""); }} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Parse result */}
+      {parsed && (
+        <div className="space-y-3 mb-4">
+          {parsed.errors.length > 0 && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-4 h-4 text-red-400" />
+                <span className="text-sm font-medium text-red-400">Ошибки ({parsed.errors.length})</span>
+              </div>
+              {parsed.errors.slice(0, 5).map((e, i) => (
+                <div key={i} className="text-xs text-red-300/80">{e}</div>
+              ))}
             </div>
-            <DropZone accept=".csv,.txt" onFile={handleFile} fileInputRef={fileInputRef} label="CSV файл Дзен Мани" hint=".csv" currentFile={fileName} onReset={resetFile} />
-            {parseError && <ErrorBanner message={parseError} />}
-            {zenPreview && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <StatCard label="Всего" value={zenPreview.transactions.length} color="text-foreground" />
-                  <StatCard label="Дох / Расх" value={`${incomeCount} / ${expenseCount}`} color="text-emerald-400" />
-                  <StatCard label="Переводы" value={transferCount} color="text-cyan-400" />
-                  <StatCard label="Новых счётов" value={zenPreview.newAccounts.length} color="text-yellow-400" />
-                </div>
-                {zenPreview.newAccounts.length > 0 && <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 p-3"><div className="text-xs font-medium text-cyan-400 mb-2">Будут созданы счета ({zenPreview.newAccounts.length}):</div><div className="flex flex-wrap gap-1">{zenPreview.newAccounts.map(a => <Badge key={a.name} variant="outline" className="text-xs border-cyan-500/30 text-cyan-400">{a.name}</Badge>)}</div></div>}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5"><span className="text-xs text-muted-foreground">Предпросмотр</span><button className="text-xs text-yellow-400 flex items-center gap-1" onClick={() => setShowAll(v => !v)}>{showAll ? <><ChevronUp className="w-3 h-3" />Свернуть</> : <><ChevronDown className="w-3 h-3" />Все</>}</button></div>
-                  <div className="rounded-xl border border-border/30 overflow-hidden"><div className="max-h-44 overflow-y-auto">{(showAll ? zenPreview.transactions : zenPreview.transactions.slice(0,8)).map((t, i) => (<div key={i} className="flex items-center gap-2 px-3 py-1.5 border-b border-border/15 last:border-0 text-xs"><span className="text-muted-foreground w-20 flex-shrink-0 font-mono">{t.date}</span><span className={`w-16 flex-shrink-0 font-semibold font-mono ${t.type === "income" ? "text-emerald-400" : t.type === "expense" ? "text-red-400" : "text-muted-foreground"}`}>{t.type === "income" ? "+" : t.type === "expense" ? "−" : "↔"}{new Intl.NumberFormat("ru-RU").format(t.amount/100)} ₽</span><span className="flex-1 truncate text-muted-foreground">{t.categoryName || t.payee || t.comment}</span></div>))}</div></div>
-                </div>
-                <div className="flex gap-2"><Button variant="outline" className="flex-1 border-border/50 text-xs h-9" onClick={resetFile}><X className="w-3.5 h-3.5 mr-1" />Отмена</Button><Button className="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold text-xs h-9" onClick={confirmZenImport} disabled={importZen.isPending} data-testid="confirm-zenmoney-import"><CheckCircle className="w-3.5 h-3.5 mr-1" />{importZen.isPending ? "Импорт..." : `Импортировать ${zenPreview.transactions.length}`}</Button></div>
+          )}
+
+          <div className="p-3 rounded-lg bg-muted/30 border border-border/30 space-y-1.5">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Транзакций</span>
+              <span className="font-semibold text-foreground">{parsed.rows.length}</span>
+            </div>
+            {parsed.newIncomeCategories.length > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Новых кат. доходов</span>
+                <span className="font-semibold text-green-400">{parsed.newIncomeCategories.length}</span>
+              </div>
+            )}
+            {parsed.newExpenseCategories.length > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Новых кат. расходов</span>
+                <span className="font-semibold text-red-400">{parsed.newExpenseCategories.length}</span>
+              </div>
+            )}
+            {parsed.newAccounts.length > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Новых счетов</span>
+                <span className="font-semibold text-yellow-400">{parsed.newAccounts.length}</span>
               </div>
             )}
           </div>
-        </TabsContent>
-        <TabsContent value="vtb">
-          <BrokerTab broker="vtb" label="ВТБ Брокер" instructions={["Приложение ВТБ Мои Инвестиции → Прочее", "Отчёты и справки → Заказать брокерский отчёт", "Формат: XLSX"]} accept=".xlsx,.xls" onFile={handleFile} fileInputRef={fileInputRef} currentFile={fileName} onReset={resetFile} preview={brokerPreview?.broker === "vtb" ? brokerPreview : null} parseError={parseError} onConfirm={confirmBrokerImport} isPending={importBroker.isPending} />
-        </TabsContent>
-        <TabsContent value="sber">
-          <BrokerTab broker="sber" label="Сбер Брокер" instructions={["Сбербанк Онлайн → Накопления → Инвестиции", "Портфель → Отчёт брокера → Скачать XLSX"]} accept=".xlsx,.xls" onFile={handleFile} fileInputRef={fileInputRef} currentFile={fileName} onReset={resetFile} preview={brokerPreview?.broker === "sber" ? brokerPreview : null} parseError={parseError} onConfirm={confirmBrokerImport} isPending={importBroker.isPending} />
-        </TabsContent>
-      </Tabs>
+
+          {parsed.rows.length > 0 && !isSuccess && (
+            <Button
+              onClick={handleImport}
+              disabled={importMutation.isPending}
+              className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-semibold"
+            >
+              {importMutation.isPending ? "Импорт..." : `Импортировать ${parsed.rows.length} транзакций`}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Success */}
+      {isSuccess && importData && (
+        <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle className="w-5 h-5 text-green-400" />
+            <span className="font-semibold text-green-400">Импорт завершён</span>
+          </div>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Импортировано</span>
+              <span className="text-green-400 font-semibold">{importData.imported}</span>
+            </div>
+            {importData.skipped > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Пропущено (дубли)</span>
+                <span className="text-yellow-400">{importData.skipped}</span>
+              </div>
+            )}
+          </div>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => { setParsed(null); setFileName(""); importMutation.reset(); }}
+            className="mt-3 border-border/40"
+          >
+            Импортировать ещё
+          </Button>
+        </div>
+      )}
+
+      {/* Recent transactions preview */}
+      <RecentTransactions />
     </>
   );
 }
 
-function BrokerTab({ broker, label, instructions, accept, onFile, fileInputRef, currentFile, onReset, preview, parseError, onConfirm, isPending }: { broker: string; label: string; instructions: string[]; accept: string; onFile: (f: File) => void; fileInputRef: React.RefObject<HTMLInputElement>; currentFile: string; onReset: () => void; preview: BrokerPreview | null; parseError: string; onConfirm: () => void; isPending: boolean; }) {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl bg-muted/20 border border-border/30 p-4 text-xs text-muted-foreground"><div className="font-medium text-foreground/80 mb-2">{label} — инструкция</div>{instructions.map((s, i) => <div key={i}>{i+1}. {s}</div>)}</div>
-      <DropZone accept={accept} onFile={onFile} fileInputRef={fileInputRef} label={`Отчёт ${label}`} hint=".xlsx" currentFile={currentFile} onReset={onReset} />
-      {parseError && <ErrorBanner message={parseError} />}
-      {preview && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2"><StatCard label="Позиций" value={preview.positions.length} color="text-foreground" /><StatCard label="Стоимость" value={`${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(preview.totalValue)} ₽`} color="text-emerald-400" /></div>
-          <div className="rounded-xl border border-border/30 overflow-hidden"><div className="max-h-52 overflow-y-auto">{preview.positions.map((p, i) => (<div key={i} className="flex items-center gap-2 px-3 py-2 border-b border-border/15 last:border-0 text-xs"><div className="w-16 flex-shrink-0"><div className="font-mono truncate">{p.isin.slice(-4) || "—"}</div><div className="text-muted-foreground capitalize">{p.type}</div></div><div className="flex-1 min-w-0"><div className="truncate">{p.name}</div><div className="text-muted-foreground">{p.quantity} шт.</div></div><div className="text-right flex-shrink-0"><div className="font-mono text-xs">{new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(p.currentPrice * p.quantity)} ₽</div></div></div>))}</div></div>
-          <div className="flex gap-2"><Button variant="outline" className="flex-1 border-border/50 text-xs h-9" onClick={onReset}><X className="w-3.5 h-3.5 mr-1" />Отмена</Button><Button className="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold text-xs h-9" onClick={onConfirm} disabled={isPending} data-testid={`confirm-${broker}-import`}><CheckCircle className="w-3.5 h-3.5 mr-1" />{isPending ? "Импорт..." : `Импортировать ${preview.positions.length}`}</Button></div>
-        </div>
-      )}
-    </div>
-  );
+function cn(...args: any[]) {
+  return args.filter(Boolean).join(" ");
 }
 
-function DropZone({ accept, onFile, fileInputRef, label, hint, currentFile, onReset }: { accept: string; onFile: (f: File) => void; fileInputRef: React.RefObject<HTMLInputElement>; label: string; hint: string; currentFile: string; onReset: () => void; }) {
-  const [dragging, setDragging] = useState(false);
-  function handleDrop(e: React.DragEvent) { e.preventDefault(); setDragging(false); const file = e.dataTransfer.files[0]; if (file) onFile(file); }
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) onFile(file); }
-  if (currentFile) return (<div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm"><FileText className="w-4 h-4 text-yellow-400 flex-shrink-0" /><span className="truncate max-w-[200px]">{currentFile}</span></div><button onClick={onReset} className="text-muted-foreground hover:text-red-400 ml-2"><X className="w-4 h-4" /></button></div>);
-  return (<div className={`rounded-xl border-2 border-dashed p-6 text-center transition-colors cursor-pointer ${dragging ? "border-yellow-500/60 bg-yellow-500/5" : "border-border/40 hover:border-border/70"}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} data-testid="dropzone"><input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={handleChange} /><Upload className="w-7 h-7 text-muted-foreground mx-auto mb-2" /><div className="text-sm">{label}</div><div className="text-xs text-muted-foreground mt-1">{hint} · нажмите или перетащите</div></div>);
-}
-function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
-  return (<div className="bg-muted/30 rounded-xl p-3 border border-border/30"><div className="text-xs text-muted-foreground mb-0.5">{label}</div><div className={`text-base font-semibold font-mono ${color}`}>{value}</div></div>);
-}
-function ErrorBanner({ message }: { message: string }) {
-  return (<div className="flex items-start gap-2 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-xs text-red-400"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>{message}</span></div>);
+function RecentTransactions() {
+  const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
+  const recent = [...transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+
+  if (transactions.length === 0) return null;
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-semibold text-muted-foreground mb-3">Последние транзакции ({transactions.length} всего)</h3>
+      <div className="space-y-1">
+        {recent.map(t => (
+          <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/10 last:border-0">
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-foreground truncate">{t.description || t.categoryName}</div>
+              <div className="text-xs text-muted-foreground">{t.date} · {t.accountName}</div>
+            </div>
+            <span className={`text-xs font-mono font-semibold ml-2 ${t.type === "income" ? "text-green-400" : "text-red-400"}`}>
+              {t.type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format(t.amount / 100)} ₽
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

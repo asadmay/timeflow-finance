@@ -3,72 +3,168 @@ import { apiRequest } from "@/lib/queryClient";
 import { useState } from "react";
 import { Plus, Check, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import PageHeader from "@/components/PageHeader";
 import AddItemDialog from "@/components/AddItemDialog";
 import { cn } from "@/lib/utils";
-import type { Goal } from "@shared/schema";
+import type { Goal, Account } from "@shared/schema";
 
-const CATEGORIES = ["Мечта", "Финансы", "Образование", "Недвижимость", "Путешествие", "Прочее"];
+const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
+
 const FIELDS = [
-  { name: "name", label: "Название цели", type: "text" as const, placeholder: "Купить квартиру", required: true },
-  { name: "targetAmount", label: "Целевая сумма (₽)", type: "number" as const, placeholder: "5000000", required: true },
+  { name: "name", label: "Название цели", type: "text" as const, placeholder: "Машина", required: true },
+  { name: "targetAmount", label: "Целевая сумма (₽)", type: "number" as const, placeholder: "1500000", required: true },
   { name: "currentAmount", label: "Накоплено (₽)", type: "number" as const, placeholder: "0" },
-  { name: "category", label: "Категория", type: "select" as const, options: CATEGORIES },
+  { name: "deadline", label: "Срок", type: "date" as const },
 ];
-
-function GoalCard({ goal, onEdit, onDelete, onToggle }: { goal: Goal; onEdit: () => void; onDelete: () => void; onToggle: () => void }) {
-  const pct = goal.targetAmount > 0 ? Math.min(100, Math.round(goal.currentAmount / goal.targetAmount * 100)) : 0;
-  const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
-  return (
-    <div data-testid={`goal-${goal.id}`} className={cn("p-4 rounded-xl border transition-all duration-200", goal.isCompleted ? "bg-emerald-500/5 border-emerald-500/20" : "bg-card border-border/40 hover:border-border/70")}>
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2 flex-1">
-          <button onClick={onToggle} className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all", goal.isCompleted ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground hover:border-yellow-400")}>
-            {goal.isCompleted && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-          </button>
-          <div>
-            <div className={cn("text-sm font-semibold", goal.isCompleted && "line-through text-muted-foreground")}>{goal.name}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{goal.category}</div>
-          </div>
-        </div>
-        <div className="flex gap-1 ml-2">
-          <button onClick={onEdit} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-          <button onClick={onDelete} className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-          <div className={cn("h-full rounded-full transition-all duration-500", goal.isCompleted ? "progress-green" : "progress-gold")} style={{ width: `${pct}%` }} />
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="num text-xs text-muted-foreground">{fmt(goal.currentAmount)} ₽</span>
-          <span className="num text-xs font-semibold text-yellow-400">{pct}%</span>
-          <span className="num text-xs text-muted-foreground">{fmt(goal.targetAmount)} ₽</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function GoalsPage() {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<Goal | null>(null);
-  const { data: goals = [], isLoading } = useQuery<Goal[]>({ queryKey: ["/api/goals"] });
-  const create = useMutation({ mutationFn: (data: any) => apiRequest("POST", "/api/goals", data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/goals"] }); setDialogOpen(false); } });
-  const update = useMutation({ mutationFn: ({ id, data }: { id: number; data: any }) => apiRequest("PATCH", `/api/goals/${id}`, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/goals"] }); setEditItem(null); } });
-  const remove = useMutation({ mutationFn: (id: number) => apiRequest("DELETE", `/api/goals/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/goals"] }) });
-  const completed = goals.filter(g => g.isCompleted).length;
+  const [linkingGoal, setLinkingGoal] = useState<Goal | null>(null);
+
+  const { data: goals = [], isLoading } = useQuery<Goal[]>({
+    queryKey: ["/api/goals"],
+  });
+  const { data: accounts = [] } = useQuery<Account[]>({
+    queryKey: ["/api/accounts"],
+  });
+
+  const create = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/goals", data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/goals"] }); setDialogOpen(false); },
+  });
+  const update = useMutation({
+    mutationFn: (data: any) => apiRequest("PATCH", `/api/goals/${editItem?.id ?? linkingGoal?.id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/goals"] });
+      setEditItem(null);
+      setLinkingGoal(null);
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/goals/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/goals"] }),
+  });
+
+  const totalTarget = goals.reduce((s, g) => s + g.targetAmount, 0);
+
   return (
     <>
-      <PageHeader title="Цели" totalLabel="Выполнено" totalDisplay={`${completed} / ${goals.length}`}
-        action={<Button size="sm" onClick={() => setDialogOpen(true)} className="bg-yellow-500 hover:bg-yellow-400 text-black font-semibold h-8 px-3" data-testid="add-goal"><Plus className="w-4 h-4 mr-1" /> Добавить</Button>}
+      <PageHeader
+        title="Цели"
+        total={goals.length}
+        totalDisplay={`${goals.length} целей`}
+        action={
+          <Button size="sm" onClick={() => setDialogOpen(true)}
+            className="bg-yellow-500 hover:bg-yellow-400 text-black font-semibold h-8 px-3"
+            data-testid="add-goal"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Добавить
+          </Button>
+        }
       />
-      {isLoading ? <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-muted/50 rounded-xl animate-pulse" />)}</div>
-      : goals.length === 0 ? <div className="text-center py-12 text-muted-foreground"><div className="text-3xl mb-3">🎯</div><div className="text-sm">Нет целей</div><div className="text-xs mt-1">Добавьте свои финансовые мечты</div></div>
-      : <div className="space-y-3">{goals.map(goal => <GoalCard key={goal.id} goal={goal} onEdit={() => setEditItem(goal)} onDelete={() => remove.mutate(goal.id)} onToggle={() => update.mutate({ id: goal.id, data: { isCompleted: !goal.isCompleted } })} />)}</div>}
-      <AddItemDialog open={dialogOpen} onClose={() => setDialogOpen(false)} title="Новая цель" fields={FIELDS} onSubmit={(data) => create.mutate({ ...data, isCompleted: false })} />
-      {editItem && <AddItemDialog open={true} onClose={() => setEditItem(null)} title="Редактировать цель" fields={FIELDS} initialValues={editItem} onSubmit={(data) => update.mutate({ id: editItem!.id, data })} />}
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground py-8 text-center">Загрузка...</div>
+      ) : goals.length === 0 ? (
+        <div className="text-sm text-muted-foreground py-8 text-center">Нет целей</div>
+      ) : (
+        <div className="space-y-3">
+          {goals.map(goal => {
+            const pct = goal.targetAmount > 0
+              ? Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100))
+              : 0;
+            const linkedAccount = accounts.find(a => a.id === goal.linkedAccountId);
+            const displayCurrent = linkedAccount ? linkedAccount.balance : goal.currentAmount;
+            const displayPct = goal.targetAmount > 0
+              ? Math.min(100, Math.round((displayCurrent / goal.targetAmount) * 100))
+              : 0;
+
+            return (
+              <div key={goal.id} className="rounded-xl border border-border/40 bg-card/60 p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-foreground text-sm truncate">{goal.name}</h3>
+                      {displayPct >= 100 && (
+                        <span className="text-yellow-400"><Check className="w-3.5 h-3.5" /></span>
+                      )}
+                    </div>
+                    {linkedAccount && (
+                      <div className="text-xs text-muted-foreground mt-0.5">→ {linkedAccount.name}</div>
+                    )}
+                    {goal.deadline && (
+                      <div className="text-xs text-muted-foreground mt-0.5">{goal.deadline}</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 ml-2">
+                    {/* Link to account */}
+                    <Select
+                      value={goal.linkedAccountId ? String(goal.linkedAccountId) : "none"}
+                      onValueChange={(v) => {
+                        update.mutate({ linkedAccountId: v === "none" ? null : parseInt(v) });
+                        // temporarily set linkingGoal so update mutation knows which goal
+                        setLinkingGoal(goal);
+                      }}
+                    >
+                      <SelectTrigger className="h-6 w-6 p-0 border-0 bg-transparent text-muted-foreground hover:text-foreground" title="Привязать счёт">
+                        <span className="text-xs">🔗</span>
+                      </SelectTrigger>
+                      <SelectContent className="bg-card border-border/50">
+                        <SelectItem value="none" className="text-xs">Без счёта</SelectItem>
+                        {accounts.map(a => (
+                          <SelectItem key={a.id} value={String(a.id)} className="text-xs">{a.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      onClick={() => setEditItem(goal)}
+                      className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => remove.mutate(goal.id)}
+                      className="p-1 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="relative h-1.5 bg-muted rounded-full overflow-hidden mb-2">
+                  <div
+                    className="absolute left-0 top-0 h-full rounded-full progress-gold transition-all duration-500"
+                    style={{ width: `${displayPct}%` }}
+                  />
+                </div>
+
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {fmt(displayCurrent)} ₽
+                    {linkedAccount && <span className="ml-1 opacity-50">(с счёта)</span>}
+                  </span>
+                  <span className="text-yellow-400 font-semibold">{displayPct}% из {fmt(goal.targetAmount)} ₽</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <AddItemDialog
+        open={dialogOpen || !!editItem}
+        onOpenChange={(open) => { if (!open) { setDialogOpen(false); setEditItem(null); } }}
+        title={editItem ? "Редактировать цель" : "Новая цель"}
+        fields={FIELDS}
+        initialValues={editItem ? { name: editItem.name, targetAmount: editItem.targetAmount, currentAmount: editItem.currentAmount, deadline: editItem.deadline } : undefined}
+        onSubmit={(data) => editItem ? update.mutate(data) : create.mutate(data)}
+        isLoading={create.isPending || update.isPending}
+      />
     </>
   );
 }
