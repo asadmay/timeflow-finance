@@ -3,14 +3,14 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist/public",
   "functions": {
-    "api/index.ts": {
-      "includeFiles": "server/**"
+    "api/index.js": {
+      "runtime": "nodejs18.x"
     }
   },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "destination": "/api/index.js"
     },
     {
       "source": "/(.*)",
