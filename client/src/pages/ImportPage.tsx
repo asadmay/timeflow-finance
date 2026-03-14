@@ -6,33 +6,9 @@ import { Button } from "@/components/ui/button";
 import PageHeader from "@/components/PageHeader";
 import type { Transaction } from "@shared/schema";
 
-// Реальные заголовки экспорта Дзенмани (оба варианта — рус. и англ.)
-const ZEN_COL_MAP: Record<string, string> = {
-  // русские
-  "дата": "date",
-  "тип": "type",
-  "категория": "category",
-  "счёт": "account",
-  "счет": "account",
-  "сумма": "amount",
-  "комментарий": "description",
-  "описание": "description",
-  // английские
-  "date": "date",
-  "type": "type",
-  "category": "category",
-  "account": "account",
-  "amount": "amount",
-  "description": "description",
-  "comment": "description",
-  // возможные варианты
-  "income/expense": "type",
-  "income / expense": "type",
-  "приход/расход": "type",
-  "приход / расход": "type",
-};
-
-const REQUIRED_COLS = ["date", "amount"];
+// Реальные заголовки экспорта Дзенмани:
+// date,categoryName,payee,comment,outcomeAccountName,outcome,outcomeCurrencyShortTitle,
+// incomeAccountName,income,incomeCurrencyShortTitle,createdDate,changedDate
 
 type ZenRow = {
   date: string;
@@ -41,22 +17,34 @@ type ZenRow = {
   account: string;
   amount: string;
   description?: string;
+  currency: string;
 };
 
 type ParseResult = {
   rows: ZenRow[];
+  skippedTransfers: number;
   newIncomeCategories: string[];
   newExpenseCategories: string[];
   newAccounts: Array<{ name: string; type: string }>;
   errors: string[];
 };
 
-function normalizeType(raw: string): "income" | "expense" | null {
-  const v = raw.toLowerCase().trim();
-  if (["income", "доход", "+", "приход"].includes(v)) return "income";
-  if (["expense", "расход", "-", "расходы"].includes(v)) return "expense";
-  // по знаку суммы определим ниже
-  return null;
+function parseAmount(raw: string): number {
+  // "70,00" -> 70, "1 234,56" -> 1234.56
+  return parseFloat(raw.replace(/\s/g, "").replace(",", ".")) || 0;
+}
+
+function parseCsvLine(raw: string): string[] {
+  const cols: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of raw) {
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (ch === "," && !inQ) { cols.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  cols.push(cur.trim());
+  return cols;
 }
 
 function parseCsvText(
@@ -69,25 +57,26 @@ function parseCsvText(
   const errors: string[] = [];
 
   if (lines.length < 2)
-    return { rows: [], newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст или содержит только заголовок"] };
+    return { rows: [], skippedTransfers: 0, newIncomeCategories: [], newExpenseCategories: [], newAccounts: [], errors: ["Файл пуст"] };
 
-  // Parse header
-  const rawHeaders = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/["'\u00ab\u00bb]/g, ""));
-  // Map to normalized keys
-  const colIndex: Record<string, number> = {};
-  rawHeaders.forEach((h, i) => {
-    const mapped = ZEN_COL_MAP[h];
-    if (mapped && !(mapped in colIndex)) colIndex[mapped] = i;
-  });
+  const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, ""));
 
-  const missing = REQUIRED_COLS.filter(c => !(c in colIndex));
-  if (missing.length > 0) {
+  const idx = (name: string) => headers.indexOf(name);
+
+  // Стандартный формат Дзенмани
+  const isZenFormat =
+    idx("date") !== -1 &&
+    (idx("outcome") !== -1 || idx("income") !== -1);
+
+  // Простой формат (date,type,category,account,amount,description)
+  const isSimpleFormat =
+    idx("date") !== -1 && idx("amount") !== -1;
+
+  if (!isZenFormat && !isSimpleFormat) {
     return {
-      rows: [],
-      newIncomeCategories: [],
-      newExpenseCategories: [],
-      newAccounts: [],
-      errors: [`Не удалось найти столбцы: ${missing.join(", ")}. Заголовки файла: ${rawHeaders.join(", ")}`],
+      rows: [], skippedTransfers: 0,
+      newIncomeCategories: [], newExpenseCategories: [], newAccounts: [],
+      errors: [`Неизвестный формат файла. Заголовки: ${headers.join(", ")}`],
     };
   }
 
@@ -95,65 +84,80 @@ function parseCsvText(
   const newExpenseCategories = new Set<string>();
   const newAccounts = new Map<string, string>();
   const rows: ZenRow[] = [];
+  let skippedTransfers = 0;
 
   for (let i = 1; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) continue;
+    const line = lines[i];
+    if (!line.trim()) continue;
 
-    // CSV parse with quoted fields
-    const cols: string[] = [];
-    let cur = "";
-    let inQ = false;
-    for (const ch of raw) {
-      if (ch === '"') { inQ = !inQ; continue; }
-      if (ch === "," && !inQ) { cols.push(cur.trim()); cur = ""; continue; }
-      cur += ch;
-    }
-    cols.push(cur.trim());
-
-    const get = (key: string) => (colIndex[key] !== undefined ? cols[colIndex[key]] ?? "" : "").trim();
+    const cols = parseCsvLine(line);
+    const get = (name: string) => (idx(name) >= 0 ? cols[idx(name)] ?? "" : "").trim();
 
     const date = get("date");
-    const category = get("category") || "Прочее";
-    const account = get("account") || "Основной";
-    const description = get("description");
-
-    // Amount — может быть со знаком
-    const rawAmount = get("amount").replace(/[^\d.,-]/g, "").replace(",", ".");
-    const amountFloat = parseFloat(rawAmount);
-
     if (!date) { errors.push(`Строка ${i + 1}: нет даты`); continue; }
-    if (isNaN(amountFloat) || amountFloat === 0) { errors.push(`Строка ${i + 1}: некорректная сумма "${get("amount")}"`); continue; }
 
-    // Determine type
+    const category = get("categoryname") || get("category") || "Прочее";
+    const comment = get("comment") || get("description") || get("payee") || "";
+    const currency = get("outcomecurrencyshorttitle") || get("incomecurrencyshorttitle") || "RUB";
+
     let type: "income" | "expense";
-    const rawType = get("type");
-    const parsedType = normalizeType(rawType);
-    if (parsedType) {
-      type = parsedType;
-    } else if (amountFloat > 0) {
-      type = "income";
+    let amount: number;
+    let account: string;
+
+    if (isZenFormat) {
+      const outcomeRaw = get("outcome");
+      const incomeRaw = get("income");
+      const outcomeAccount = get("outcomeaccountname");
+      const incomeAccount = get("incomeaccountname");
+
+      const outcomeAmt = parseAmount(outcomeRaw);
+      const incomeAmt = parseAmount(incomeRaw);
+
+      const hasOutcome = outcomeAmt > 0 && outcomeAccount;
+      const hasIncome = incomeAmt > 0 && incomeAccount;
+
+      if (hasOutcome && hasIncome) {
+        // Перевод между счетами — пропускаем
+        skippedTransfers++;
+        continue;
+      } else if (hasOutcome) {
+        type = "expense";
+        amount = outcomeAmt;
+        account = outcomeAccount;
+      } else if (hasIncome) {
+        type = "income";
+        amount = incomeAmt;
+        account = incomeAccount;
+      } else {
+        errors.push(`Строка ${i + 1}: нет суммы`);
+        continue;
+      }
     } else {
-      type = "expense";
+      // Простой формат
+      const rawAmt = get("amount").replace(/[^\d.,-]/g, "").replace(",", ".");
+      amount = Math.abs(parseFloat(rawAmt));
+      if (!amount) { errors.push(`Строка ${i + 1}: некорректная сумма`); continue; }
+      const rawType = get("type").toLowerCase();
+      type = ["income", "доход", "приход"].includes(rawType) ? "income" : "expense";
+      account = get("account") || "Основной";
     }
 
-    const absAmount = Math.abs(amountFloat).toString();
-
-    // Track new categories
-    if (type === "income" && category && !existingIncomeCats.includes(category))
+    // Трекинг новых категорий
+    if (type === "income" && category !== "Прочее" && !existingIncomeCats.includes(category))
       newIncomeCategories.add(category);
-    if (type === "expense" && category && !existingExpenseCats.includes(category))
+    if (type === "expense" && category !== "Прочее" && !existingExpenseCats.includes(category))
       newExpenseCategories.add(category);
 
-    // Track new accounts
+    // Трекинг новых счетов
     if (account && !existingAccounts.includes(account) && !newAccounts.has(account))
       newAccounts.set(account, "card");
 
-    rows.push({ date, type, category, account, amount: absAmount, description });
+    rows.push({ date, type, category, account, amount: amount.toString(), description: comment, currency });
   }
 
   return {
     rows,
+    skippedTransfers,
     newIncomeCategories: Array.from(newIncomeCategories),
     newExpenseCategories: Array.from(newExpenseCategories),
     newAccounts: Array.from(newAccounts.entries()).map(([name, type]) => ({ name, type })),
@@ -177,9 +181,7 @@ export default function ImportPage() {
   const existingAccounts = (accounts as any[]).map((a: any) => a.name);
 
   const importMutation = useMutation({
-    mutationFn: async (payload: any) => {
-      return apiRequest("POST", "/api/import/zenmoney", payload);
-    },
+    mutationFn: async (payload: any) => apiRequest("POST", "/api/import/zenmoney", payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/transactions"] });
       qc.invalidateQueries({ queryKey: ["/api/accounts"] });
@@ -194,39 +196,28 @@ export default function ImportPage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const result = parseCsvText(text, existingIncomeCats, existingExpenseCats, existingAccounts);
-      setParsed(result);
+      setParsed(parseCsvText(text, existingIncomeCats, existingExpenseCats, existingAccounts));
     };
     reader.readAsText(file, "UTF-8");
   };
 
   const handleImport = () => {
     if (!parsed || parsed.rows.length === 0) return;
-    const transactions = parsed.rows.map(row => ({
-      date: row.date,
-      type: row.type,
-      categoryName: row.category,
-      accountName: row.account,
-      amount: Math.round(parseFloat(row.amount) * 100),
-      description: row.description || null,
-      currency: "RUB",
-    }));
     importMutation.mutate({
-      transactions,
+      transactions: parsed.rows.map(row => ({
+        date: row.date,
+        type: row.type,
+        categoryName: row.category,
+        accountName: row.account,
+        amount: Math.round(parseFloat(row.amount) * 100),
+        comment: row.description || "",
+        currency: row.currency || "RUB",
+        source: "zenmoney",
+      })),
       newIncomeCategories: parsed.newIncomeCategories,
       newExpenseCategories: parsed.newExpenseCategories,
       newAccounts: parsed.newAccounts,
     });
-  };
-
-  const downloadTemplate = () => {
-    const header = "date,type,category,account,amount,description";
-    const example = "2024-01-15,income,Зарплата,Сбербанк,75000,Зарплата январь\n2024-01-20,expense,Продукты,Сбербанк,3500,Пятёрочка";
-    const blob = new Blob([`${header}\n${example}\n`], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "template.csv"; a.click();
-    URL.revokeObjectURL(url);
   };
 
   const isSuccess = importMutation.isSuccess;
@@ -234,17 +225,7 @@ export default function ImportPage() {
 
   return (
     <>
-      <PageHeader title="Импорт" total={0} totalDisplay="" />
-
-      <div className="mb-4">
-        <button
-          onClick={downloadTemplate}
-          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Скачать шаблон CSV
-        </button>
-      </div>
+      <PageHeader title="Импорт из Дзенмани" total={0} totalDisplay="" />
 
       <div
         className={cn(
@@ -263,6 +244,7 @@ export default function ImportPage() {
         <Upload className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
         <div className="text-sm font-medium text-foreground mb-1">Перетащите CSV файл из Дзенмани</div>
         <div className="text-xs text-muted-foreground">или нажмите для выбора</div>
+        <div className="text-xs text-muted-foreground/60 mt-1">Переводы между счетами будут пропущены</div>
       </div>
 
       <input ref={fileRef} type="file" accept=".csv" className="hidden"
@@ -285,7 +267,7 @@ export default function ImportPage() {
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
               <div className="flex items-center gap-2 mb-2">
                 <AlertCircle className="w-4 h-4 text-red-400" />
-                <span className="text-sm font-medium text-red-400">Ошибки ({parsed.errors.length})</span>
+                <span className="text-sm font-medium text-red-400">Ошибки парсинга ({parsed.errors.length})</span>
               </div>
               {parsed.errors.slice(0, 5).map((e, i) => (
                 <div key={i} className="text-xs text-red-300/80">{e}</div>
@@ -298,6 +280,12 @@ export default function ImportPage() {
               <span className="text-muted-foreground">Транзакций к импорту</span>
               <span className="font-semibold text-foreground">{parsed.rows.length}</span>
             </div>
+            {parsed.skippedTransfers > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Переводов пропущено</span>
+                <span className="text-muted-foreground">{parsed.skippedTransfers}</span>
+              </div>
+            )}
             {parsed.newIncomeCategories.length > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Новых кат. доходов</span>
@@ -348,8 +336,7 @@ export default function ImportPage() {
               </div>
             )}
           </div>
-          <Button
-            size="sm" variant="outline"
+          <Button size="sm" variant="outline"
             onClick={() => { setParsed(null); setFileName(""); importMutation.reset(); }}
             className="mt-3 border-border/40"
           >
@@ -363,28 +350,24 @@ export default function ImportPage() {
   );
 }
 
-function cn(...args: any[]) {
-  return args.filter(Boolean).join(" ");
-}
+function cn(...args: any[]) { return args.filter(Boolean).join(" "); }
 
 function RecentTransactions() {
   const { data: transactions = [] } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
-  const recent = [...transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
-
+  const recent = [...transactions].sort((a: any, b: any) => b.date.localeCompare(a.date)).slice(0, 20);
   if (transactions.length === 0) return null;
-
   return (
     <div className="mt-6">
       <h3 className="text-sm font-semibold text-muted-foreground mb-3">Последние транзакции ({transactions.length} всего)</h3>
       <div className="space-y-1">
-        {recent.map(t => (
+        {recent.map((t: any) => (
           <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-border/10 last:border-0">
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-foreground truncate">{(t as any).description || (t as any).categoryName}</div>
-              <div className="text-xs text-muted-foreground">{(t as any).date} · {(t as any).accountName}</div>
+              <div className="text-xs text-foreground truncate">{t.comment || t.categoryName || "Прочее"}</div>
+              <div className="text-xs text-muted-foreground">{t.date} · {t.accountName} · {t.categoryName}</div>
             </div>
-            <span className={`text-xs font-mono font-semibold ml-2 ${(t as any).type === "income" ? "text-green-400" : "text-red-400"}`}>
-              {(t as any).type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format((t as any).amount / 100)} ₽
+            <span className={`text-xs font-mono font-semibold ml-2 ${t.type === "income" ? "text-green-400" : "text-red-400"}`}>
+              {t.type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format(t.amount / 100)} ₽
             </span>
           </div>
         ))}
