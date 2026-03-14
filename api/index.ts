@@ -7,6 +7,7 @@ const httpServer = createServer(app);
 
 app.use(
   express.json({
+    limit: "20mb",
     verify: (req: any, _res, buf) => {
       req.rawBody = buf;
     },
