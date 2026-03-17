@@ -155,17 +155,53 @@ export async function registerRoutes(server: Server, app: Express) {
 
   // ── Import (ZenMoney) ────────────────────────────────────────────────
   app.post("/api/import/zenmoney", wrap(async (req, res) => {
+    console.log(`[import] Received POST request with body:`, {
+      transactionCount: req.body?.transactions?.length,
+      newIncomeCategories: req.body?.newIncomeCategories?.length,
+      newExpenseCategories: req.body?.newExpenseCategories?.length,
+      newAccounts: req.body?.newAccounts?.length,
+    });
+
     const { transactions: txns = [], newIncomeCategories = [], newExpenseCategories = [], newAccounts = [] } = req.body;
+    const results = { categoriesCreated: 0, accountsCreated: 0, importErrors: [] };
+
+    // Create income categories
     for (const name of newIncomeCategories as string[]) {
-      try { await storage.createIncomeCategory({ name, color: "#22c55e", icon: "trending-up", isDefault: false }); } catch {}
+      try { 
+        await storage.createIncomeCategory({ name, color: "#22c55e", icon: "trending-up", isDefault: false }); 
+        results.categoriesCreated++;
+      } catch (err: any) {
+        console.warn(`[import] Failed to create income category "${name}":`, err.message);
+        results.importErrors.push(`Income category "${name}": ${err.message}`);
+      }
     }
+
+    // Create expense categories
     for (const name of newExpenseCategories as string[]) {
-      try { await storage.createExpenseCategory({ name, color: "#ef4444", icon: "trending-down", isDefault: false }); } catch {}
+      try { 
+        await storage.createExpenseCategory({ name, color: "#ef4444", icon: "trending-down", isDefault: false }); 
+        results.categoriesCreated++;
+      } catch (err: any) {
+        console.warn(`[import] Failed to create expense category "${name}":`, err.message);
+        results.importErrors.push(`Expense category "${name}": ${err.message}`);
+      }
     }
+
+    // Create accounts
     for (const acc of newAccounts as any[]) {
-      try { await storage.createAccount({ name: acc.name, type: acc.type || "card", balance: 0, currency: "RUB", color: "#6366f1", icon: "wallet", isArchived: false }); } catch {}
+      try { 
+        await storage.createAccount({ name: acc.name, type: acc.type || "card", balance: 0, currency: "RUB", color: "#6366f1", icon: "wallet", isArchived: false }); 
+        results.accountsCreated++;
+      } catch (err: any) {
+        console.warn(`[import] Failed to create account "${acc.name}":`, err.message);
+        results.importErrors.push(`Account "${acc.name}": ${err.message}`);
+      }
     }
+
+    // Import transactions in parallel batches with deduplication
     let imported = 0;
+    let totalSkipped = 0;
+    const batchPromises: Promise<any>[] = [];
     for (let i = 0; i < txns.length; i += 50) {
       const chunk = (txns as any[]).slice(i, i + 50).map((t: any) => ({
         date: t.date, type: t.type, amount: t.amount,
@@ -176,10 +212,27 @@ export async function registerRoutes(server: Server, app: Express) {
         comment: t.description || t.comment || "",
         source: t.source || "zenmoney",
       }));
-      const rows = await storage.createTransactionsBatch(chunk);
-      imported += rows.length;
+      batchPromises.push(
+        storage.createTransactionsBatchWithDedup(chunk)
+          .then(result => { 
+            imported += result.imported.length;
+            totalSkipped += result.skipped;
+          })
+          .catch(err => {
+            console.error(`[import] Batch import failed:`, err.message);
+            results.importErrors.push(`Batch import: ${err.message}`);
+          })
+      );
     }
-    res.json({ imported, skipped: (txns as any[]).length - imported });
+    await Promise.all(batchPromises);
+
+    const response = { 
+      imported, 
+      skipped: totalSkipped,
+      errors: results.importErrors.length > 0 ? results.importErrors : undefined
+    };
+    console.log(`[import] Complete:`, response);
+    res.json(response);
   }));
 
   // ── Incomes ──────────────────────────────────────────────────────────
