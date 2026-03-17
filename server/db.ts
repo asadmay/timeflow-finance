@@ -1,3 +1,6 @@
+// Load env variables first (before any checks)
+import "./env";
+
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "../shared/schema";

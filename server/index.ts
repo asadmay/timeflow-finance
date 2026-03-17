@@ -1,20 +1,28 @@
 // Load .env in development (tsx doesn't auto-load it)
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 if (process.env.NODE_ENV !== "production") {
-  try {
-    const envPath = resolve(process.cwd(), ".env");
-    const lines = readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const val = trimmed.slice(eq + 1).trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
-      if (!process.env[key]) process.env[key] = val;
+  const loadEnvFile = (filePath: string) => {
+    try {
+      if (!existsSync(filePath)) return;
+      const lines = readFileSync(filePath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+        if (!process.env[key]) process.env[key] = val;
+      }
+    } catch (err) {
+      console.warn(`Failed to load ${filePath}:`, err);
     }
-  } catch {}
+  };
+
+  // Try loading .env.local first, then .env (local overrides global)
+  loadEnvFile(resolve(process.cwd(), ".env.local"));
+  loadEnvFile(resolve(process.cwd(), ".env"));
 }
 
 import express, { type Request, Response, NextFunction } from "express";
@@ -96,7 +104,8 @@ app.use((req, res, next) => {
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
-    log(`serving on port ${port}`);
+  const host = process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
+  httpServer.listen({ port, host }, () => {
+    log(`serving on http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
   });
 })();
