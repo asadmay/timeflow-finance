@@ -135,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         
         const { transactions: txns = [], newIncomeCategories = [], newExpenseCategories = [], newAccounts = [] } = body;
-        const results = { categoriesCreated: 0, accountsCreated: 0, importErrors: [] };
+        const results = { categoriesCreated: 0, accountsCreated: 0, importErrors: [] as string[] };
 
         // Create income categories
         for (const name of newIncomeCategories as string[]) {

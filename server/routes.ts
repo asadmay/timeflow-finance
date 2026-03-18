@@ -163,7 +163,7 @@ export async function registerRoutes(server: Server, app: Express) {
     });
 
     const { transactions: txns = [], newIncomeCategories = [], newExpenseCategories = [], newAccounts = [] } = req.body;
-    const results = { categoriesCreated: 0, accountsCreated: 0, importErrors: [] };
+    const results = { categoriesCreated: 0, accountsCreated: 0, importErrors: [] as string[] };
 
     // Create income categories
     for (const name of newIncomeCategories as string[]) {

@@ -1,7 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db as defaultDb } from "./db";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { Database } from "drizzle-orm";
 import {
   profile, accounts, deposits, incomeCategories, expenseCategories,
   brokerPositions, transactions, incomes, expenses, assets, liabilities,
@@ -117,8 +116,57 @@ export class DatabaseStorage {
     }
     return this.db.select().from(transactions); 
   }
+  async resolveTransactionRelations(txn: InsertTransaction): Promise<InsertTransaction> {
+    const res = { ...txn };
+    
+    if (!res.accountId && res.accountName) {
+      const accs = await this.db.select().from(accounts).where(sql`LOWER(${accounts.name}) = LOWER(${res.accountName})`).limit(1);
+      if (accs.length > 0) {
+        res.accountId = accs[0].id;
+      } else {
+        const [newAcc] = await this.db.insert(accounts).values({
+          name: res.accountName, type: "card", balance: 0, currency: res.currency || "RUB", color: "#6366f1", icon: "wallet", isArchived: false
+        }).returning();
+        res.accountId = newAcc.id;
+      }
+    }
+    
+    if (!res.incomeCategoryId && res.type === "income" && res.categoryName) {
+      const cats = await this.db.select().from(incomeCategories).where(sql`LOWER(${incomeCategories.name}) = LOWER(${res.categoryName})`).limit(1);
+      if (cats.length > 0) {
+        res.incomeCategoryId = cats[0].id;
+      } else {
+        const [newCat] = await this.db.insert(incomeCategories).values({ name: res.categoryName, color: "#22c55e", icon: "trending-up", isDefault: false }).returning();
+        res.incomeCategoryId = newCat.id;
+      }
+    } else if (!res.expenseCategoryId && res.type === "expense" && res.categoryName) {
+      const cats = await this.db.select().from(expenseCategories).where(sql`LOWER(${expenseCategories.name}) = LOWER(${res.categoryName})`).limit(1);
+      if (cats.length > 0) {
+        res.expenseCategoryId = cats[0].id;
+      } else {
+        const [newCat] = await this.db.insert(expenseCategories).values({ name: res.categoryName, color: "#ef4444", icon: "trending-down", isDefault: false }).returning();
+        res.expenseCategoryId = newCat.id;
+      }
+    }
+
+    if (res.type === "transfer" && !res.targetAccountId) {
+      const payeeStr = res.payee?.toLowerCase().trim() || "";
+      let targetName = "";
+      if (payeeStr.startsWith("transfer to ")) targetName = payeeStr.replace("transfer to ", "").trim();
+      else if (payeeStr.includes("перевод на ")) targetName = payeeStr.split("перевод на ")[1].trim();
+
+      if (targetName) {
+        const accs = await this.db.select().from(accounts).where(sql`LOWER(${accounts.name}) = LOWER(${targetName})`).limit(1);
+        if (accs.length > 0) res.targetAccountId = accs[0].id;
+      }
+    }
+    return res;
+  }
+
+  // ────────────────────────────────────────────────────────
   async createTransaction(data: InsertTransaction): Promise<Transaction> {
-    const rows = await this.db.insert(transactions).values(data).returning();
+    const resolvedTxn = await this.resolveTransactionRelations(data);
+    const rows = await this.db.insert(transactions).values(resolvedTxn).returning();
     return rows[0];
   }
 
@@ -147,9 +195,10 @@ export class DatabaseStorage {
 
     // Check each transaction for duplicates
     for (const txn of data) {
-      const isDuplicate = await this.checkDuplicate(txn);
+      const resolvedTxn = await this.resolveTransactionRelations(txn);
+      const isDuplicate = await this.checkDuplicate(resolvedTxn);
       if (!isDuplicate) {
-        toInsert.push(txn);
+        toInsert.push(resolvedTxn);
       } else {
         skipped++;
       }
