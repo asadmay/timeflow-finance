@@ -116,6 +116,11 @@ export class DatabaseStorage {
     }
     return this.db.select().from(transactions); 
   }
+
+  async getTransaction(id: number): Promise<Transaction | undefined> {
+    const rows = await this.db.select().from(transactions).where(eq(transactions.id, id));
+    return rows[0];
+  }
   async resolveTransactionRelations(txn: InsertTransaction): Promise<InsertTransaction> {
     const res = { ...txn };
     
@@ -167,6 +172,12 @@ export class DatabaseStorage {
   async createTransaction(data: InsertTransaction): Promise<Transaction> {
     const resolvedTxn = await this.resolveTransactionRelations(data);
     const rows = await this.db.insert(transactions).values(resolvedTxn).returning();
+    return rows[0];
+  }
+
+  async updateTransaction(id: number, data: Partial<InsertTransaction>): Promise<Transaction> {
+    const resolvedTxn = await this.resolveTransactionRelations(data as InsertTransaction);
+    const rows = await this.db.update(transactions).set(resolvedTxn).where(eq(transactions.id, id)).returning();
     return rows[0];
   }
 

@@ -139,10 +139,31 @@ export async function registerRoutes(server: Server, app: Express) {
     res.json(await storage.createTransactionsBatch(batch));
   }));
   app.post("/api/transactions", wrap(async (req, res) => {
-    const { description, ...rest } = req.body;
-    res.json(await storage.createTransaction(
-      insertTransactionSchema.parse({ ...rest, comment: description || rest.comment || "" })
-    ));
+    const data = insertTransactionSchema.parse(req.body);
+    const txn = await storage.createTransaction(data);
+    if (txn.accountId) await storage.recalculateBalance(txn.accountId ?? undefined);
+    if (txn.targetAccountId) await storage.recalculateBalance(txn.targetAccountId ?? undefined);
+    res.json(txn);
+  }));
+
+  app.patch("/api/transactions/:id", wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const existing = await storage.getTransaction(id);
+    if (!existing) return res.status(404).json({ error: "Transaction not found" });
+
+    const updated = await storage.updateTransaction(id, req.body);
+    
+    const accs = new Set<number>();
+    if (existing.accountId !== null) accs.add(existing.accountId);
+    if (existing.targetAccountId !== null) accs.add(existing.targetAccountId);
+    if (updated.accountId !== null) accs.add(updated.accountId);
+    if (updated.targetAccountId !== null) accs.add(updated.targetAccountId);
+    
+    for (const accId of Array.from(accs)) {
+      await storage.recalculateBalance(accId);
+    }
+    
+    res.json(updated);
   }));
   app.delete("/api/transactions/:id", wrap(async (req, res) => {
     await storage.deleteTransaction(Number(req.params.id));

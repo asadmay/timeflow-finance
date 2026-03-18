@@ -5,13 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
-import type { Account, IncomeCategory, ExpenseCategory } from "@shared/schema";
+import type { Account, IncomeCategory, ExpenseCategory, Transaction } from "@shared/schema";
 
 interface TransactionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: any, type: "income" | "expense" | "transfer") => void;
   isLoading?: boolean;
+  initialData?: Transaction | null;
 }
 
 export default function TransactionDialog({
@@ -19,6 +20,7 @@ export default function TransactionDialog({
   onOpenChange,
   onSubmit,
   isLoading,
+  initialData,
 }: TransactionDialogProps) {
   const [type, setType] = useState<"expense" | "income" | "transfer">("expense");
   const [amount, setAmount] = useState("");
@@ -34,20 +36,34 @@ export default function TransactionDialog({
 
   useEffect(() => {
     if (open) {
-      setType("expense");
-      setAmount("");
-      setAccountId(accounts[0]?.id.toString() || "");
-      setTargetAccountId("");
-      setCategoryId("");
-      setDate(new Date().toISOString().split("T")[0]);
-      setComment("");
+      if (initialData) {
+        setType(initialData.type as any);
+        setAmount((initialData.amount / 100).toString());
+        setAccountId(initialData.accountId?.toString() || "");
+        if (initialData.type === "transfer") {
+          setTargetAccountId(initialData.targetAccountId?.toString() || "");
+        } else {
+          setCategoryId((initialData.incomeCategoryId || initialData.expenseCategoryId)?.toString() || "");
+        }
+        setDate(initialData.date.substring(0, 10));
+        setComment(initialData.comment || "");
+      } else {
+        setType("expense");
+        setAmount("");
+        setAccountId(accounts[0]?.id.toString() || "");
+        setTargetAccountId("");
+        setCategoryId("");
+        setDate(new Date().toISOString().split("T")[0]);
+        setComment("");
+      }
     }
-  }, [open, accounts]);
+  }, [open, accounts, initialData]);
 
-  useEffect(() => {
+  const handleTypeChange = (v: any) => {
+    setType(v);
     setCategoryId("");
     setTargetAccountId("");
-  }, [type]);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,7 +111,7 @@ export default function TransactionDialog({
           
           <div className="space-y-1.5">
             <Label className="text-sm text-muted-foreground">Тип</Label>
-            <Select value={type} onValueChange={(v: any) => setType(v)}>
+            <Select value={type} onValueChange={handleTypeChange} disabled={!!initialData && initialData.type === "transfer"}>
               <SelectTrigger className="bg-muted border-border/40">
                 <SelectValue />
               </SelectTrigger>
@@ -202,7 +218,7 @@ export default function TransactionDialog({
               disabled={isLoading || !accountId || (type === "transfer" ? !targetAccountId : !categoryId) || !amount}
               className="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold"
             >
-              {isLoading ? "Сохранение..." : "Сохранить"}
+              {isLoading ? "Сохранение..." : (initialData ? "Обновить" : "Сохранить")}
             </Button>
           </div>
 

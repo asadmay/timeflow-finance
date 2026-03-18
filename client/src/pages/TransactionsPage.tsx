@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Trash2, Search, Filter, Plus } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Trash2, Search, Filter, Plus, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   const { data: transactions = [], isLoading } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions"],
@@ -39,6 +40,15 @@ export default function TransactionsPage() {
     },
   });
 
+  const updateTx = useMutation({
+    mutationFn: ({ id, data }: { id: number, data: any }) => apiRequest("PATCH", `/api/transactions/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/transactions"] });
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setDialogOpen(false);
+    },
+  });
+
   const createTransfer = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/transfers", data),
     onSuccess: () => {
@@ -49,7 +59,9 @@ export default function TransactionsPage() {
   });
 
   const handleTransactionSubmit = (data: any, type: "income" | "expense" | "transfer") => {
-    if (type === "transfer") {
+    if (editingTx) {
+      updateTx.mutate({ id: editingTx.id, data });
+    } else if (type === "transfer") {
       createTransfer.mutate(data);
     } else {
       createTx.mutate(data);
@@ -90,7 +102,7 @@ export default function TransactionsPage() {
         title="Транзакции"
         totalDisplay={`${transactions.length} записей`}
         action={
-          <Button size="sm" onClick={() => setDialogOpen(true)}
+          <Button size="sm" onClick={() => { setEditingTx(null); setDialogOpen(true); }}
             className="bg-yellow-500 hover:bg-yellow-400 text-black font-semibold h-8 px-3"
             data-testid="add-transaction"
           >
@@ -189,13 +201,22 @@ export default function TransactionsPage() {
                       {t.type === "income" ? "+" : t.type === "expense" ? "−" : "↔"}
                       {fmt(t.amount)} ₽
                     </div>
-                    <button
-                      onClick={() => remove.mutate(t.id)}
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all ml-1"
-                      data-testid={`delete-tx-${t.id}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex -mr-2 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={() => { setEditingTx(t); setDialogOpen(true); }}
+                        className="p-2 text-muted-foreground hover:text-yellow-400"
+                        data-testid={`edit-tx-${t.id}`}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => remove.mutate(t.id)}
+                        className="p-2 text-muted-foreground hover:text-red-400"
+                        data-testid={`delete-tx-${t.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -206,9 +227,13 @@ export default function TransactionsPage() {
 
       <TransactionDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setEditingTx(null);
+        }}
         onSubmit={handleTransactionSubmit}
-        isLoading={createTx.isPending || createTransfer.isPending}
+        isLoading={createTx.isPending || createTransfer.isPending || updateTx.isPending}
+        initialData={editingTx}
       />
     </>
   );
