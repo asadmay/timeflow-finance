@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState, useMemo } from "react";
-import { Pencil, Check, ChevronDown, ChevronUp, Wallet, PiggyBank, Briefcase, Calendar } from "lucide-react";
+import { Pencil, Check, ChevronDown, ChevronUp, Wallet, PiggyBank, Briefcase, Calendar, Target } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -123,6 +123,11 @@ export default function DashboardPage() {
 
   const netWorth = accountsTotal + depositsTotal + brokerTotal + (profile?.cash ?? 0) + totalAssetsValue - totalLiabilitiesAmount;
 
+  const passiveIncome = assetCashflow + depositsExpected;
+  const totalMonthlyExpense = totalExpense + liabilityPayment;
+  const finIndRaw = totalMonthlyExpense > 0 ? (passiveIncome / totalMonthlyExpense) * 100 : (passiveIncome > 0 ? 100 : 0);
+  const finInd = Math.min(100, Math.floor(finIndRaw));
+
   const saveName = () => {
     if (nameVal.trim()) updateProfile.mutate({ name: nameVal.trim() });
     setEditingName(false);
@@ -176,6 +181,33 @@ export default function DashboardPage() {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* FinInd Widget */}
+      <div className="mb-4 bg-card border border-border/50 rounded-2xl p-4 overflow-hidden relative shadow-sm">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
+        <div className="flex items-center justify-between mb-3 relative z-10">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-yellow-500/20 text-yellow-400">
+              <Target className="w-4 h-4" />
+            </div>
+            <h2 className="text-sm font-semibold text-foreground">Финансовая независимость</h2>
+          </div>
+          <span className="text-xl font-bold font-mono text-yellow-400">{finInd}%</span>
+        </div>
+        <div className="relative h-2.5 bg-muted rounded-full overflow-hidden z-10">
+          <div 
+            className={cn(
+               "absolute left-0 top-0 h-full transition-all duration-1000",
+               finInd >= 100 ? "bg-gradient-to-r from-emerald-500 to-green-400" : "bg-gradient-to-r from-yellow-500 to-amber-400"
+            )}
+            style={{ width: `${finInd}%` }}
+          />
+        </div>
+        <div className="flex justify-between mt-3 text-xs text-muted-foreground relative z-10">
+          <div><span className="opacity-70">Пассивный доход:</span> <span className="font-medium text-foreground ml-1">{fmt(passiveIncome)}</span></div>
+          <div><span className="opacity-70">Расход:</span> <span className="font-medium text-foreground ml-1">{fmt(totalMonthlyExpense)}</span></div>
+        </div>
       </div>
 
       {/* Stats */}
