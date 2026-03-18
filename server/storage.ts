@@ -111,7 +111,12 @@ export class DatabaseStorage {
   async clearBrokerPositions(): Promise<void> { await this.db.delete(brokerPositions); }
 
   // ── Transactions
-  async getTransactions(): Promise<Transaction[]> { return this.db.select().from(transactions); }
+  async getTransactions(filters?: { type?: string }): Promise<Transaction[]> { 
+    if (filters?.type) {
+      return this.db.select().from(transactions).where(eq(transactions.type, filters.type));
+    }
+    return this.db.select().from(transactions); 
+  }
   async createTransaction(data: InsertTransaction): Promise<Transaction> {
     const rows = await this.db.insert(transactions).values(data).returning();
     return rows[0];
@@ -252,22 +257,38 @@ export class DatabaseStorage {
       const details: Array<{ accountId: number; balance: number }> = [];
 
       for (const account of allAccounts) {
-        // Получить все транзакции для этого счёта
-        const txns = await this.db
+        // Получить все исходящие транзакции для этого счёта
+        const outgoingTxns = await this.db
           .select()
           .from(transactions)
           .where(eq(transactions.accountId, account.id));
 
-        // Вычислить сумму (доходы добавляются, расходы вычитаются)
+        // Получить все входящие переводы для этого счёта (из других счетов)
+        const incomingTransfers = await this.db
+          .select()
+          .from(transactions)
+          .where(eq(transactions.targetAccountId, account.id));
+
+        // Вычислить сумму (доходы добавляются, расходы вычитаются, переводы учитываются)
         let calculatedBalance = 0;
-        for (const txn of txns) {
+        
+        // Обработать исходящие транзакции
+        for (const txn of outgoingTxns) {
           if (txn.type === "income") {
             calculatedBalance += txn.amount;
           } else if (txn.type === "expense") {
             calculatedBalance -= txn.amount;
           } else if (txn.type === "transfer") {
-            // Переводы не меняют общий баланс, только перемещают между счётами
-            // TODO: нужна логика для определения направления трансфера
+            // Перевод ИЗ этого счета - вычесть
+            calculatedBalance -= txn.amount;
+          }
+        }
+
+        // Обработать входящие переводы
+        for (const txn of incomingTransfers) {
+          if (txn.type === "transfer") {
+            // Перевод В этот счет - добавить
+            calculatedBalance += txn.amount;
           }
         }
 
@@ -286,6 +307,108 @@ export class DatabaseStorage {
       console.error("[recalculate] Error:", error);
       throw error;
     }
+  }
+
+  // ── Transfers
+  /**
+   * Создать перевод между двумя счётами
+   * Вычитает из исходного счета, добавляет целевому
+   */
+  async createTransfer(data: {
+    date: string;
+    amount: number;
+    fromAccountId: number;
+    toAccountId: number;
+    comment?: string;
+  }): Promise<{ from: Transaction; to: Transaction; success: boolean }> {
+    try {
+      // Валидация
+      if (data.fromAccountId === data.toAccountId) {
+        throw new Error("Cannot transfer to the same account");
+      }
+      if (data.amount <= 0) {
+        throw new Error("Transfer amount must be positive");
+      }
+
+      // Получить источник и целевой счета
+      const fromAccount = await this.getAccount(data.fromAccountId);
+      const toAccount = await this.getAccount(data.toAccountId);
+
+      if (!fromAccount) throw new Error(`Source account #${data.fromAccountId} not found`);
+      if (!toAccount) throw new Error(`Target account #${data.toAccountId} not found`);
+
+      // Проверить достаточность средств
+      if (fromAccount.balance < data.amount) {
+        console.warn(
+          `[transfer] Insufficient funds: ${fromAccount.name} has ${fromAccount.balance}, trying to transfer ${data.amount}`
+        );
+      }
+
+      // Создать две связанные транзакции
+      const fromTransaction = await this.createTransaction({
+        date: data.date,
+        type: "transfer",
+        amount: data.amount,
+        currency: fromAccount.currency,
+        categoryName: "",
+        accountName: fromAccount.name,
+        accountId: fromAccount.id,
+        targetAccountId: toAccount.id,
+        payee: `Transfer to ${toAccount.name}`,
+        comment: data.comment || "",
+        source: "manual",
+      });
+
+      const toTransaction = await this.createTransaction({
+        date: data.date,
+        type: "transfer",
+        amount: data.amount,
+        currency: toAccount.currency,
+        categoryName: "",
+        accountName: toAccount.name,
+        accountId: toAccount.id,
+        targetAccountId: fromAccount.id,
+        payee: `Transfer from ${fromAccount.name}`,
+        comment: data.comment || "",
+        source: "manual",
+      });
+
+      // Обновить балансы обоих счетов
+      await this.db
+        .update(accounts)
+        .set({ balance: fromAccount.balance - data.amount })
+        .where(eq(accounts.id, fromAccount.id));
+
+      await this.db
+        .update(accounts)
+        .set({ balance: toAccount.balance + data.amount })
+        .where(eq(accounts.id, toAccount.id));
+
+      console.log(
+        `[transfer] ✓ ${data.amount} transferred from ${fromAccount.name} to ${toAccount.name}`
+      );
+
+      return {
+        from: fromTransaction,
+        to: toTransaction,
+        success: true,
+      };
+    } catch (error) {
+      console.error("[transfer] Error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получить все переводы для счёта
+   */
+  async getAccountTransfers(accountId: number): Promise<Transaction[]> {
+    return this.db
+      .select()
+      .from(transactions)
+      .where(
+        sql`(${transactions.accountId} = ${accountId} OR ${transactions.targetAccountId} = ${accountId}) AND ${transactions.type} = 'transfer'`
+      );
   }
 }
 

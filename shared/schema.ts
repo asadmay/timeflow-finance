@@ -85,6 +85,8 @@ export const transactions = pgTable("transactions", {
   accountId: integer("account_id"),               // связанный счет (transactions -> accounts)
   incomeCategoryId: integer("income_category_id"), // для доходов (transactions -> income_categories)
   expenseCategoryId: integer("expense_category_id"), // для расходов (transactions -> expense_categories)
+  // Для переводов между счетами
+  targetAccountId: integer("target_account_id"), // счет-получатель при type=transfer
 });
 
 // ─── Incomes ──────────────────────────────────────────────────────────────────

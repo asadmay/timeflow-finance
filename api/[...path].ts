@@ -314,6 +314,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (method === "DELETE") { await storage.deleteTimeEntry(id); return res.json({ ok: true }); }
     }
 
+    // ── Transfers
+    if (path === "/api/transfers") {
+      if (method === "GET") return res.json(await storage.getTransactions({ type: "transfer" }));
+      if (method === "POST") {
+        const { fromAccountId, toAccountId, amount, date, comment } = body;
+        return res.json(await storage.createTransfer({
+          fromAccountId: parseInt(fromAccountId),
+          toAccountId: parseInt(toAccountId),
+          amount: parseFloat(amount),
+          date: new Date(date).toISOString(),
+          comment: comment || "",
+        }));
+      }
+    }
+    if (path.match(/^\/api\/accounts\/\d+\/transfers$/)) {
+      const accountId = parseInt(path.split("/")[3]);
+      if (method === "GET") return res.json(await storage.getAccountTransfers(accountId));
+    }
+
     return res.status(404).json({ message: `Not found: ${method} ${path}` });
   } catch (err: any) {
     console.error(`[api] ${method} ${path} error:`, err);

@@ -368,4 +368,22 @@ export async function registerRoutes(server: Server, app: Express) {
     await storage.deleteTimeEntry(Number(req.params.id));
     res.json({ ok: true });
   }));
+
+  // ── Transfers ────────────────────────────────────────────────────────
+  app.get("/api/transfers", wrap(async (_req, res) => {
+    res.json(await storage.getTransactions({ type: "transfer" }));
+  }));
+  app.post("/api/transfers", wrap(async (req, res) => {
+    const { fromAccountId, toAccountId, amount, date, comment } = req.body;
+    res.json(await storage.createTransfer({
+      fromAccountId: Number(fromAccountId),
+      toAccountId: Number(toAccountId),
+      amount: parseFloat(amount),
+      date: new Date(date).toISOString(),
+      comment: comment || "",
+    }));
+  }));
+  app.get("/api/accounts/:id/transfers", wrap(async (req, res) => {
+    res.json(await storage.getAccountTransfers(Number(req.params.id)));
+  }));
 }
