@@ -153,10 +153,10 @@ export default function ExpensesPage() {
                 {txns.map(t => (
                   <ItemRow
                     key={t.id}
-                    label={t.description || t.categoryName || "Расход"}
+                    label={t.comment || t.categoryName || "Расход"}
                     value={`−${fmt(t.amount)} ₽`}
                     valueColor="neg"
-                    sub={t.date}
+                    subtitle={t.date}
                   />
                 ))}
               </CategorySection>

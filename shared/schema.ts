@@ -126,6 +126,7 @@ export const liabilities = pgTable("liabilities", {
   amount: integer("amount").notNull(),
   payment: integer("payment").notNull().default(0),
   category: text("category").notNull().default("Рутины"),
+  rate: text("rate"),
 });
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
@@ -136,6 +137,8 @@ export const goals = pgTable("goals", {
   currentAmount: integer("current_amount").notNull().default(0),
   isCompleted: boolean("is_completed").notNull().default(false),
   category: text("category").notNull().default("Мечта"),
+  deadline: text("deadline"),
+  linkedAccountId: integer("linked_account_id").references(() => accounts.id),
 });
 
 // ─── Time Entries ─────────────────────────────────────────────────────────────
@@ -144,6 +147,7 @@ export const timeEntries = pgTable("time_entries", {
   name: text("name").notNull(),
   hours: integer("hours").notNull(),
   type: text("type").notNull(),
+  value: integer("value"),
 });
 
 // ─── Insert schemas ───────────────────────────────────────────────────────────

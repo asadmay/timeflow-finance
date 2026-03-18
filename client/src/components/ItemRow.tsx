@@ -2,7 +2,8 @@ import { Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ItemRowProps {
-  name: string;
+  name?: string;
+  label?: string;
   value: string;
   valueColor?: "pos" | "neg" | "neutral";
   subtitle?: string;
@@ -11,14 +12,16 @@ interface ItemRowProps {
   testId?: string;
 }
 
-export default function ItemRow({ name, value, valueColor = "neutral", subtitle, onEdit, onDelete, testId }: ItemRowProps) {
+export default function ItemRow({ name, label, value, valueColor = "neutral", subtitle, onEdit, onDelete, testId }: ItemRowProps) {
+  const displayName = name || label || "";
+  
   return (
     <div
       data-testid={testId}
       className="item-card flex items-center justify-between px-3 py-2.5 rounded-lg group"
     >
       <div className="flex-1 min-w-0 mr-2">
-        <div className="text-sm font-medium text-foreground truncate">{name}</div>
+        <div className="text-sm font-medium text-foreground truncate">{displayName}</div>
         {subtitle && <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>}
       </div>
       <div className="flex items-center gap-2 shrink-0">

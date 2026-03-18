@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export interface FieldDef {
   name: string;
   label: string;
-  type: "text" | "number" | "select";
+  type: "text" | "number" | "select" | "date";
   options?: string[];
   placeholder?: string;
   required?: boolean;

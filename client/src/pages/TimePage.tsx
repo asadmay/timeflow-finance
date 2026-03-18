@@ -18,7 +18,7 @@ const FIELDS = [
   { name: "name", label: "Название", type: "text" as const, placeholder: "Работа", required: true },
   { name: "hours", label: "Часов / нед", type: "number" as const, placeholder: "40", required: true },
   { name: "value", label: "Ценность (1-10)", type: "number" as const, placeholder: "8" },
-  { name: "category", label: "Категория", type: "select" as const, options: CATEGORY_OPTIONS },
+  { name: "type", label: "Категория", type: "select" as const, options: CATEGORY_OPTIONS },
 ];
 
 export default function TimePage() {
@@ -44,7 +44,7 @@ export default function TimePage() {
   });
 
   const totalHours = entries.reduce((s, e) => s + e.hours, 0);
-  const grouped = groupBy(entries, e => e.category);
+  const grouped = groupBy(entries, e => e.type);
 
   return (
     <>
@@ -80,7 +80,7 @@ export default function TimePage() {
                   key={item.id}
                   label={item.name}
                   value={`${item.hours} ч/нед`}
-                  sub={item.value ? `Ценность: ${item.value}/10` : undefined}
+                  subtitle={item.value ? `Ценность: ${item.value}/10` : undefined}
                   onEdit={() => setEditItem(item)}
                   onDelete={() => remove.mutate(item.id)}
                 />
@@ -95,7 +95,7 @@ export default function TimePage() {
         onOpenChange={(open) => { if (!open) { setDialogOpen(false); setEditItem(null); } }}
         title={editItem ? "Редактировать запись" : "Новая запись"}
         fields={FIELDS}
-        initialValues={editItem ? { name: editItem.name, hours: editItem.hours, value: editItem.value, category: editItem.category } : undefined}
+        initialValues={editItem ? { name: editItem.name, hours: editItem.hours, value: editItem.value, type: editItem.type } : undefined}
         onSubmit={(data) => editItem ? update.mutate(data) : create.mutate(data)}
         isLoading={create.isPending || update.isPending}
       />

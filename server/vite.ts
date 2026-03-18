@@ -33,7 +33,7 @@ export async function setupVite(httpServer: Server, app: Express) {
         process.exit(1);
       },
     },
-    server: serverOptions,
+    server: serverOptions as any,
     appType: "custom",
   });
 

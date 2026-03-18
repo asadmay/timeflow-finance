@@ -85,7 +85,7 @@ export default function AssetsPage() {
                   label={item.name}
                   value={`${fmt(item.value)} ₽`}
                   valueColor="pos"
-                  sub={item.cashflow ? `CF: +${fmt(item.cashflow)} ₽/мес` : undefined}
+                  subtitle={item.cashflow ? `CF: +${fmt(item.cashflow)} ₽/мес` : undefined}
                   onEdit={() => setEditItem(item)}
                   onDelete={() => remove.mutate(item.id)}
                 />

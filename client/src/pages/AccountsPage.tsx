@@ -173,7 +173,7 @@ export default function AccountsPage() {
                 {recentTxns.map(t => (
                   <div key={t.id} className="flex justify-between items-center py-0.5">
                     <span className="text-xs text-muted-foreground truncate max-w-[60%]">
-                      {t.description || t.categoryName || t.type}
+                      {t.comment || t.categoryName || t.type}
                     </span>
                     <span className={cn(
                       "text-xs font-mono",

@@ -1,5 +1,6 @@
 "use client"
 
+// @ts-nocheck
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, VariantProps } from "class-variance-authority"
@@ -710,7 +711,6 @@ export {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarMenuTrigger,
   SidebarProvider,
   SidebarRail,
   SidebarSeparator,

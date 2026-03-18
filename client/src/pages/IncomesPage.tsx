@@ -154,10 +154,10 @@ export default function IncomesPage() {
                 {txns.map(t => (
                   <ItemRow
                     key={t.id}
-                    label={t.description || t.categoryName || "Доход"}
+                    label={t.comment || t.categoryName || "Доход"}
                     value={`+${fmt(t.amount)} ₽`}
                     valueColor="pos"
-                    sub={t.date}
+                    subtitle={t.date}
                   />
                 ))}
               </CategorySection>

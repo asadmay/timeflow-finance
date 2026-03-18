@@ -86,7 +86,7 @@ export default function LiabilitiesPage() {
                   label={item.name}
                   value={`${fmt(item.amount)} ₽`}
                   valueColor="neg"
-                  sub={item.payment ? `Платёж: −${fmt(item.payment)} ₽/мес` : undefined}
+                  subtitle={item.payment ? `Платёж: −${fmt(item.payment)} ₽/мес` : undefined}
                   onEdit={() => setEditItem(item)}
                   onDelete={() => remove.mutate(item.id)}
                 />
