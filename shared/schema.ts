@@ -81,6 +81,10 @@ export const transactions = pgTable("transactions", {
   payee: text("payee").notNull().default(""),
   comment: text("comment").notNull().default(""),
   source: text("source").notNull().default("manual"), // manual | zenmoney | vtb | sber
+  // Foreign Keys для связности данных
+  accountId: integer("account_id"),               // связанный счет (transactions -> accounts)
+  incomeCategoryId: integer("income_category_id"), // для доходов (transactions -> income_categories)
+  expenseCategoryId: integer("expense_category_id"), // для расходов (transactions -> expense_categories)
 });
 
 // ─── Incomes ──────────────────────────────────────────────────────────────────

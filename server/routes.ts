@@ -198,20 +198,46 @@ export async function registerRoutes(server: Server, app: Express) {
       }
     }
 
+    // Получить все счёты и категории для привязки
+    const allAccounts = await storage.getAccounts();
+    const allIncomeCategories = await storage.getIncomeCategories();
+    const allExpenseCategories = await storage.getExpenseCategories();
+
     // Import transactions in parallel batches with deduplication
     let imported = 0;
     let totalSkipped = 0;
     const batchPromises: Promise<any>[] = [];
     for (let i = 0; i < txns.length; i += 50) {
-      const chunk = (txns as any[]).slice(i, i + 50).map((t: any) => ({
-        date: t.date, type: t.type, amount: t.amount,
-        currency: t.currency || "RUB",
-        categoryName: t.categoryName || "",
-        accountName: t.accountName || "",
-        payee: t.payee || "",
-        comment: t.description || t.comment || "",
-        source: t.source || "zenmoney",
-      }));
+      const chunk = (txns as any[]).slice(i, i + 50).map((t: any) => {
+        // Найти счет по имени
+        const account = allAccounts.find(a => a.name.toLowerCase() === (t.accountName || "").toLowerCase());
+        
+        // Найти категорию по типу и имени
+        let incomeCategoryId: number | undefined;
+        let expenseCategoryId: number | undefined;
+        if (t.type === "income" && t.categoryName) {
+          const cat = allIncomeCategories.find(c => c.name.toLowerCase() === t.categoryName.toLowerCase());
+          incomeCategoryId = cat?.id;
+        } else if (t.type === "expense" && t.categoryName) {
+          const cat = allExpenseCategories.find(c => c.name.toLowerCase() === t.categoryName.toLowerCase());
+          expenseCategoryId = cat?.id;
+        }
+        
+        return {
+          date: t.date,
+          type: t.type,
+          amount: t.amount,
+          currency: t.currency || "RUB",
+          categoryName: t.categoryName || "",
+          accountName: t.accountName || "",
+          accountId: account?.id || undefined,
+          incomeCategoryId,
+          expenseCategoryId,
+          payee: t.payee || "",
+          comment: t.description || t.comment || "",
+          source: t.source || "zenmoney",
+        };
+      });
       batchPromises.push(
         storage.createTransactionsBatchWithDedup(chunk)
           .then(result => { 

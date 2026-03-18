@@ -237,6 +237,56 @@ export class DatabaseStorage {
     return rows[0];
   }
   async deleteTimeEntry(id: number): Promise<void> { await this.db.delete(timeEntries).where(eq(timeEntries.id, id)); }
+
+  // ── Recalculate Balances
+  /**
+   * Пересчитать балансы всех счётов на основе транзакций
+   * Вычисляет: SUM(transactions.amount) для каждого счёта
+   */
+  async recalculateBalance(accountId?: number): Promise<{ updated: number; details: Array<{ accountId: number; balance: number }> }> {
+    try {
+      const allAccounts = accountId 
+        ? await this.db.select().from(accounts).where(eq(accounts.id, accountId))
+        : await this.db.select().from(accounts);
+
+      const details: Array<{ accountId: number; balance: number }> = [];
+
+      for (const account of allAccounts) {
+        // Получить все транзакции для этого счёта
+        const txns = await this.db
+          .select()
+          .from(transactions)
+          .where(eq(transactions.accountId, account.id));
+
+        // Вычислить сумму (доходы добавляются, расходы вычитаются)
+        let calculatedBalance = 0;
+        for (const txn of txns) {
+          if (txn.type === "income") {
+            calculatedBalance += txn.amount;
+          } else if (txn.type === "expense") {
+            calculatedBalance -= txn.amount;
+          } else if (txn.type === "transfer") {
+            // Переводы не меняют общий баланс, только перемещают между счётами
+            // TODO: нужна логика для определения направления трансфера
+          }
+        }
+
+        // Обновить баланс счёта
+        await this.db
+          .update(accounts)
+          .set({ balance: calculatedBalance })
+          .where(eq(accounts.id, account.id));
+
+        details.push({ accountId: account.id, balance: calculatedBalance });
+        console.log(`[recalculate] Account "${account.name}" (#${account.id}): ${calculatedBalance}`);
+      }
+
+      return { updated: allAccounts.length, details };
+    } catch (error) {
+      console.error("[recalculate] Error:", error);
+      throw error;
+    }
+  }
 }
 
 export const storage = new DatabaseStorage();
