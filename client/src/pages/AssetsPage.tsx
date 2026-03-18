@@ -10,7 +10,7 @@ import AddItemDialog from "@/components/AddItemDialog";
 import { groupBy } from "@/lib/format";
 import type { Asset } from "@shared/schema";
 
-const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
+const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(Math.round(Math.abs(n) / 100));
 
 const CATEGORY_OPTIONS = [
   "Недвижимость", "Автомобиль", "Техника", "Инвестиции", "Бизнес", "Прочее",

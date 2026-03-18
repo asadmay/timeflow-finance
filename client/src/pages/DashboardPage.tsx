@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type { Profile, Income, Expense, Asset, Liability, Account, Deposit, BrokerPosition, Transaction } from "@shared/schema";
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU").format(Math.abs(n)) + " ₽";
+  return new Intl.NumberFormat("ru-RU").format(Math.abs(Math.round(n / 100))) + " ₽";
 }
 
 type Period = "current_month" | "last_month" | "current_year" | "all";
@@ -262,7 +262,7 @@ export default function DashboardPage() {
                 <div key={a.id} className="flex justify-between py-1.5 border-b border-border/10 last:border-0">
                   <span className="text-xs text-muted-foreground">{a.name}</span>
                   <span className={cn("text-xs font-mono font-semibold", a.balance >= 0 ? "text-foreground/80" : "text-red-400")}>
-                    {new Intl.NumberFormat("ru-RU").format(a.balance)} {a.currency}
+                    {new Intl.NumberFormat("ru-RU").format(Math.round(a.balance / 100))} {a.currency}
                   </span>
                 </div>
               ))}
@@ -293,7 +293,7 @@ export default function DashboardPage() {
                   <div key={d.id} className="flex justify-between py-1.5 border-b border-border/10 last:border-0">
                     <span className="text-xs text-muted-foreground">{d.name} · {d.rate}%</span>
                     <span className="text-xs font-mono font-semibold text-foreground/80">
-                      {new Intl.NumberFormat("ru-RU").format(d.amount)} ₽
+                      {new Intl.NumberFormat("ru-RU").format(Math.round(d.amount / 100))} ₽
                     </span>
                   </div>
                 ))}

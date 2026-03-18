@@ -9,7 +9,7 @@ import AddItemDialog from "@/components/AddItemDialog";
 import { cn } from "@/lib/utils";
 import type { Account, Transaction } from "@shared/schema";
 
-const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
+const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(Math.round(n / 100));
 
 type AccountType = "card" | "cash" | "savings" | "broker" | "crypto" | "other";
 

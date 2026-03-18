@@ -8,7 +8,7 @@ import AddItemDialog from "@/components/AddItemDialog";
 import { cn } from "@/lib/utils";
 import type { Deposit } from "@shared/schema";
 
-const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
+const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(Math.round(Math.abs(n) / 100));
 
 function calcIncome(deposit: Deposit): number {
   const start = new Date(deposit.startDate);
