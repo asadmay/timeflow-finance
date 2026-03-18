@@ -1,11 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Trash2, Search, Filter } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Trash2, Search, Filter, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import PageHeader from "@/components/PageHeader";
+import TransactionDialog from "@/components/TransactionDialog";
 import type { Transaction } from "@shared/schema";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -18,6 +19,7 @@ export default function TransactionsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const { data: transactions = [], isLoading } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions"],
@@ -27,6 +29,32 @@ export default function TransactionsPage() {
     mutationFn: (id: number) => apiRequest("DELETE", `/api/transactions/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/transactions"] }),
   });
+
+  const createTx = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/transactions", data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/transactions"] });
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setDialogOpen(false);
+    },
+  });
+
+  const createTransfer = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/transfers", data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/transactions"] });
+      qc.invalidateQueries({ queryKey: ["/api/accounts"] });
+      setDialogOpen(false);
+    },
+  });
+
+  const handleTransactionSubmit = (data: any, type: "income" | "expense" | "transfer") => {
+    if (type === "transfer") {
+      createTransfer.mutate(data);
+    } else {
+      createTx.mutate(data);
+    }
+  };
 
   const filtered = transactions.filter((t) => {
     if (typeFilter !== "all" && t.type !== typeFilter) return false;
@@ -61,6 +89,14 @@ export default function TransactionsPage() {
       <PageHeader
         title="Транзакции"
         totalDisplay={`${transactions.length} записей`}
+        action={
+          <Button size="sm" onClick={() => setDialogOpen(true)}
+            className="bg-yellow-500 hover:bg-yellow-400 text-black font-semibold h-8 px-3"
+            data-testid="add-transaction"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Добавить
+          </Button>
+        }
       />
 
       {/* Summary */}
@@ -167,6 +203,13 @@ export default function TransactionsPage() {
           ))}
         </div>
       )}
+
+      <TransactionDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSubmit={handleTransactionSubmit}
+        isLoading={createTx.isPending || createTransfer.isPending}
+      />
     </>
   );
 }
