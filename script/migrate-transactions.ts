@@ -9,6 +9,9 @@
  * Запуск: npx tsx script/migrate-transactions.ts
  */
 
+// Загрузить env переменные ДО любых других импортов
+import "../server/env";
+
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { transactions, accounts, incomeCategories, expenseCategories } from "../shared/schema";

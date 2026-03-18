@@ -8,6 +8,9 @@
  * Запуск: npx tsx script/recalculate-balances.ts
  */
 
+// Загрузить env переменные ДО любых других импортов
+import "../server/env";
+
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { DatabaseStorage } from "../server/storage";
