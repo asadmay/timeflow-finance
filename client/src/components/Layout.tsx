@@ -1,8 +1,9 @@
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
   Scale, TrendingUp, TrendingDown, Building2, Landmark,
-  Clock, Target, Wallet, PiggyBank, Tag, Upload, ArrowLeftRight,
+  Clock, Target, Wallet, PiggyBank, Tag, Upload, ArrowLeftRight, X, Menu
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -20,11 +21,13 @@ const NAV_ITEMS = [
   { path: "/transactions", icon: ArrowLeftRight, label: "История", color: "text-blue-400" },
 ];
 
-// First 6 items in bottom mobile nav, rest accessible via sidebar or swipe
-const MOBILE_NAV = NAV_ITEMS.slice(0, 6);
-
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -82,42 +85,77 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* ── Mobile layout ── */}
       <div className="flex sm:hidden flex-col min-h-screen">
         {/* Content area */}
-        <div className="flex-1 overflow-y-auto pb-20">
+        <div className="flex-1 overflow-y-auto pb-24">
           <div className="p-4">
             {children}
           </div>
         </div>
 
-        {/* Bottom navigation bar — horizontally scrollable */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card/95 border-t border-border/50 backdrop-blur-md"
-          style={{ boxShadow: "0 -4px 20px rgba(0,0,0,0.4)" }}>
-          <div className="flex overflow-x-auto scrollbar-hide px-2 py-2 gap-1">
-            {NAV_ITEMS.map(({ path, icon: Icon, label, color }) => {
+        {/* Bottom navigation bar */}
+        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 border-t border-border/50 backdrop-blur-md"
+          style={{ boxShadow: "0 -4px 20px rgba(0,0,0,0.4)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+          <div className="flex justify-around items-center px-1 py-1 h-14">
+            {NAV_ITEMS.filter(it => ["/", "/transactions", "/accounts", "/goals"].includes(it.path)).map(({ path, icon: Icon, label, color }) => {
               const isActive = location === path || (path !== "/" && location.startsWith(path));
               return (
-                <Link key={path} href={path}>
+                <Link key={path} href={path} className="flex-1 h-full">
                   <button
                     data-testid={`mobile-nav-${label}`}
                     className={cn(
-                      "flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-xl transition-all flex-shrink-0",
+                      "w-full h-full flex flex-col items-center justify-center gap-1 rounded-xl transition-all",
                       isActive
-                        ? "bg-yellow-500/15 border border-yellow-500/30"
-                        : "border border-transparent hover:bg-muted/40"
+                        ? "text-yellow-400"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                     )}
                   >
-                    <Icon
-                      className={cn("w-5 h-5", isActive ? color : "text-muted-foreground")}
-                      strokeWidth={isActive ? 2.5 : 1.8}
-                    />
-                    <span className={cn("text-[9px] font-medium leading-none whitespace-nowrap", isActive ? "text-yellow-400" : "text-muted-foreground/70")}>
-                      {label}
-                    </span>
+                    <Icon className={cn("w-5 h-5", isActive ? color : "text-opacity-80")} strokeWidth={isActive ? 2.5 : 2} />
+                    <span className="text-[10px] font-medium leading-none">{label}</span>
                   </button>
                 </Link>
               );
             })}
+            
+            {/* Menu Button */}
+            <div className="flex-1 h-full">
+              <button
+                onClick={() => setMobileMenuOpen(true)}
+                className={cn(
+                  "w-full h-full flex flex-col items-center justify-center gap-1 rounded-xl transition-all text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                  mobileMenuOpen && "text-yellow-400"
+                )}
+              >
+                <Menu className="w-5 h-5 text-current" strokeWidth={mobileMenuOpen ? 2.5 : 2} />
+                <span className="text-[10px] font-medium leading-none">Меню</span>
+              </button>
+            </div>
           </div>
         </nav>
+
+        {/* Menu Overlay */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col animate-in slide-in-from-bottom-5 duration-200">
+            <div className="flex items-center justify-between p-4 border-b border-border/50 pt-[env(safe-area-inset-top,1rem)]">
+              <h2 className="text-xl font-semibold pl-2">Меню</h2>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-2 -mr-2 text-muted-foreground hover:text-foreground bg-muted/40 rounded-full">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 pb-24">
+              <div className="grid grid-cols-2 gap-3">
+                {NAV_ITEMS.filter(it => !["/", "/transactions", "/accounts", "/goals"].includes(it.path)).map(({ path, icon: Icon, label, color }) => (
+                  <Link key={path} href={path}>
+                    <button className="w-full h-24 flex flex-col items-center justify-center gap-3 rounded-2xl bg-card border border-border/50 shadow-sm active:scale-95 transition-all text-center">
+                      <div className={cn("p-2.5 rounded-full bg-background border border-border/50 shadow-inner", color)}>
+                        <Icon className="w-6 h-6" strokeWidth={2} />
+                      </div>
+                      <span className="font-medium text-[13px] text-foreground/90">{label}</span>
+                    </button>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,21 @@
+{
+  "name": "Timeflow Finance",
+  "short_name": "Timeflow",
+  "description": "Приложение учета и аналитики личных финансов",
+  "start_url": "/?source=pwa",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
