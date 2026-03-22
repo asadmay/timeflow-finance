@@ -273,6 +273,12 @@ export async function registerRoutes(server: Server, app: Express) {
     }
     await Promise.all(batchPromises);
 
+    // Recalculate balances for all accounts to reflect imported transactions
+    const accountsAfterImport = await storage.getAccounts();
+    for (const acc of accountsAfterImport) {
+      await storage.recalculateBalance(acc.id);
+    }
+
     const response = { 
       imported, 
       skipped: totalSkipped,
