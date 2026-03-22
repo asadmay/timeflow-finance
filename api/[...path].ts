@@ -22,6 +22,15 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
   return res.status(status).json({ message });
 });
 
+// Vercel strips the /api prefix from req.url inside the api directory.
+// We must prepend it back so our Express routes (which expect /api/*) match correctly.
+app.use((req, res, next) => {
+  if (req.url && !req.url.startsWith("/api")) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
 registerRoutes({} as any, app).catch(console.error);
 
 export default app;
