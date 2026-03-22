@@ -23,21 +23,25 @@ try {
 
 // Build server with esbuild
 console.log('Building server...');
-try {
-  await build({
-    entryPoints: ['server/index.ts'],
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    outfile: path.join(outdir, 'server.js'),
-    packages: 'external',
-    define: {
-      'process.env.NODE_ENV': '"production"'
-    }
-  });
-} catch (e) {
-  console.error('Server build failed:', e);
-  process.exit(1);
+async function buildServer() {
+  try {
+    await build({
+      entryPoints: ['server/index.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      outfile: path.join(outdir, 'server.js'),
+      packages: 'external',
+      define: {
+        'process.env.NODE_ENV': '"production"'
+      }
+    });
+  } catch (e) {
+    console.error('Server build failed:', e);
+    process.exit(1);
+  }
 }
 
-console.log('Build complete!');
+buildServer().then(() => {
+  console.log('Build complete!');
+});
