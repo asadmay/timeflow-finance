@@ -25,7 +25,7 @@ export async function setupVite(httpServer: Server, app: Express) {
 
   const vite = await createViteServer({
     ...serverOptions,
-    configFile: path.resolve(import.meta.dirname, "../vite.config.ts"),
+    configFile: path.resolve(process.cwd(), "vite.config.ts"),
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -43,12 +43,7 @@ export async function setupVite(httpServer: Server, app: Express) {
   app.use("/{*splat}", async (req, res, next) => {
     const url = req.originalUrl;
     try {
-      const clientTemplate = path.resolve(
-        import.meta.dirname,
-        "..",
-        "client",
-        "index.html",
-      );
+      const clientTemplate = path.resolve(process.cwd(), "client", "index.html");
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,
