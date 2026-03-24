@@ -25,8 +25,31 @@ type ParseResult = {
   errors: string[];
 };
 
+/**
+ * Robust amount parser supporting all common Russian/international formats:
+ * "1 234,56" | "1234.56" | "1234,56" | "-1 234,56" | "−1234.56" (Unicode minus)
+ */
 function parseAmount(raw: string): number {
-  return parseFloat(raw.replace(/[\s\u00a0]/g, "").replace(",", ".")) || 0;
+  if (!raw) return 0;
+  // Replace unicode minus signs with regular minus
+  let s = raw.replace(/[\u2212\u2013\u2014]/g, "-");
+  // Remove all whitespace and non-breaking spaces (thousands separators)
+  s = s.replace(/[\s\u00a0\u202f]/g, "");
+  // If there's both a period and a comma, the last one is the decimal separator
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  if (lastComma > lastDot) {
+    // Comma is decimal separator: remove all dots, replace comma with dot
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot > lastComma) {
+    // Dot is decimal separator: remove all commas
+    s = s.replace(/,/g, "");
+  } else {
+    // Only one separator or none
+    s = s.replace(",", ".");
+  }
+  const result = parseFloat(s);
+  return isNaN(result) ? 0 : result;
 }
 
 function parseCsvLine(raw: string): string[] {
@@ -48,12 +71,10 @@ function parseCsvText(
   existingExpenseCats: string[],
   existingAccounts: string[]
 ): ParseResult {
-  // Убираем BOM (если есть)
   const cleaned = text.replace(/^\uFEFF/, "");
   const allLines = cleaned.split(/\r?\n/);
   const errors: string[] = [];
 
-  // Если первая строка — служебный заголовок zm_dump, пропускаем его и все пустые строки после
   let startIdx = 0;
   if (allLines[0].replace(/^\uFEFF/, "").toLowerCase().startsWith("zm_dump")) {
     startIdx = 1;
@@ -117,9 +138,9 @@ function parseCsvText(
       else if (hasIncome) { type = "income"; amount = incomeAmt; account = incomeAccount; }
       else { errors.push(`Строка ${i + 1}: нет суммы`); continue; }
     } else {
-      const rawAmt = get("amount").replace(/[^\d.,-]/g, "").replace(",", ".");
-      amount = Math.abs(parseFloat(rawAmt));
-      if (!amount) { errors.push(`Строка ${i + 1}: некорректная сумма`); continue; }
+      const rawAmt = get("amount");
+      amount = Math.abs(parseAmount(rawAmt));
+      if (!amount) { errors.push(`Строка ${i + 1}: некорректная сумма "${rawAmt}"`); continue; }
       const rawType = get("type").toLowerCase();
       type = ["income", "доход", "приход"].includes(rawType) ? "income" : "expense";
       account = get("account") || "Основной";
@@ -177,6 +198,7 @@ export default function ImportPage() {
       const text = e.target?.result as string;
       setParsed(parseCsvText(text, existingIncomeCats, existingExpenseCats, existingAccounts));
     };
+    // Try UTF-8 first, common for modern exports
     reader.readAsText(file, "UTF-8");
   };
 
@@ -188,7 +210,8 @@ export default function ImportPage() {
         type: row.type,
         categoryName: row.category,
         accountName: row.account,
-        amount: Math.round(parseFloat(row.amount) * 100),
+        // parseAmount already returns float, multiply by 100 for cents storage
+        amount: Math.round(parseAmount(row.amount) * 100),
         comment: row.description || "",
         currency: row.currency || "RUB",
       })),
@@ -250,6 +273,9 @@ export default function ImportPage() {
               {parsed.errors.slice(0, 5).map((e, i) => (
                 <div key={i} className="text-xs text-red-300/80">{e}</div>
               ))}
+              {parsed.errors.length > 5 && (
+                <div className="text-xs text-red-300/50 mt-1">... и ещё {parsed.errors.length - 5} ошибок</div>
+              )}
             </div>
           )}
 
@@ -345,7 +371,7 @@ function RecentTransactions() {
               <div className="text-xs text-muted-foreground">{t.date} · {t.accountName} · {t.categoryName}</div>
             </div>
             <span className={`text-xs font-mono font-semibold ml-2 ${t.type === "income" ? "text-green-400" : "text-red-400"}`}>
-              {t.type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU").format(t.amount / 100)} ₽
+              {t.type === "income" ? "+" : "−"}{new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(t.amount / 100)} ₽
             </span>
           </div>
         ))}
